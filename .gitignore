@@ -1,0 +1,31 @@
+# Secrets — NEVER commit this file, it has your real Twilio/DB credentials
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Django
+db.sqlite3
+media/
+staticfiles/
+
+# Node (only relevant if you ever run npm here)
+node_modules/
+
+# Editor/OS junk
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# Celery Beat runtime schedule files (regenerated automatically, not source)
+celerybeat-schedule*

@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tasty Zone Smart Ops</title>
+<link rel="manifest" href="/static/billing/manifest.json">
+<meta name="theme-color" content="#0f1720">
+<link rel="apple-touch-icon" href="/static/billing/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tasty Zone">
+<style>
+  :root {
+    --bg: #0f1720;
+    --panel: #17212c;
+    --panel-border: #24313f;
+    --text: #e8edf2;
+    --muted: #8a97a3;
+    --accent: #ff8a3d;
+    --accent-2: #2dd4bf;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f6f8;
+    --panel: #ffffff;
+    --panel-border: #dde3e8;
+    --text: #16202a;
+    --muted: #5b6b78;
+    --accent: #ff8a3d;
+    --accent-2: #0d7d70;
+    --green: #059669;
+    --amber: #b45309;
+    --red: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 32px 24px 64px;
+  }
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    max-width: 1100px;
+    margin: 0 auto 28px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 26px;
+    letter-spacing: -0.01em;
+  }
+  header h1 span { color: var(--accent); }
+  header .subtitle { color: var(--muted); font-size: 14px; }
+  #refresh-btn {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  #refresh-btn:hover { border-color: var(--accent); }
+
+  .container { max-width: 1100px; margin: 0 auto; }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .stat-card .label { color: var(--muted); font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat-card .value { font-size: 28px; font-weight: 600; margin-top: 6px; }
+  .stat-card.warn .value { color: var(--amber); }
+  .stat-card.danger .value { color: var(--red); }
+  .stat-card.good .value { color: var(--green); }
+
+  .panels {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 850px) { .panels { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 20px 22px;
+    margin-bottom: 20px;
+  }
+  .panel h2 {
+    font-size: 15px;
+    margin: 0 0 14px;
+    color: var(--accent-2);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--panel-border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; }
+  tr:last-child td { border-bottom: none; }
+
+  .empty { color: var(--muted); font-size: 13.5px; padding: 8px 0; }
+
+  .decision-row { padding: 10px 0; border-bottom: 1px solid var(--panel-border); }
+  .decision-row:last-child { border-bottom: none; }
+  .decision-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .decision-header .ingredient { font-weight: 600; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+  .badge.critical { background: rgba(248,113,113,0.15); color: var(--red); }
+  .badge.low_stock { background: rgba(251,191,36,0.15); color: var(--amber); }
+  .badge.sufficient { background: rgba(52,211,153,0.15); color: var(--green); }
+  .reasoning { color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+  .summary-text {
+    white-space: pre-wrap;
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: #d5dde3;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  }
+
+  .badge.unit { color: var(--muted); font-weight: 400; text-transform: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div style="display:flex; align-items:center; gap:12px;">
+    <img src="/static/billing/logo.png" alt="Tasty Zone" style="height:44px; width:44px; border-radius:50%; object-fit:cover;">
+    <div>
+      <h1>{{ shop.name|default:"Tasty Zone" }} <span>Smart Ops</span></h1>
+      <div class="subtitle">Palavakkam Beach, Chennai — live from the billing, forecast &amp; agent APIs</div>
+    </div>
+  </div>
+  <div style="display:flex; align-items:center; gap:18px;">
+    <nav style="display:flex; gap:4px;">
+      <a href="/dashboard/" style="color:var(--accent-2); text-decoration:none; font-size:14px;">Dashboard</a>
+      <a href="/billing/" style="color:var(--muted); text-decoration:none; font-size:14px; margin-left:18px;">Billing</a>
+      <form method="post" action="/accounts/logout/" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" style="background:none; border:none; color:var(--muted); text-decoration:none; font-size:14px; margin-left:18px; cursor:pointer; font-family:inherit; padding:0;">Sign out</button>
+      </form>
+    </nav>
+    <button id="refresh-btn" onclick="loadDashboard()">Refresh</button>
+    <button id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle dark/light theme"
+      style="background:var(--panel); border:1px solid var(--panel-border); color:var(--text); padding:8px 12px; border-radius:8px; cursor:pointer; font-size:14px;">☀️</button>
+  </div>
+</header>
+
+<div class="container">
+
+  <div class="stat-grid">
+    <div class="stat-card good">
+      <div class="label">Today's Sales</div>
+      <div class="value" id="stat-sales">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Bills Today</div>
+      <div class="value" id="stat-bill-count">—</div>
+    </div>
+    <div class="stat-card warn">
+      <div class="label">Low Stock Items</div>
+      <div class="value" id="stat-low-stock">—</div>
+    </div>
+    <div class="stat-card danger">
+      <div class="label">Critical Agent Alerts</div>
+      <div class="value" id="stat-critical">—</div>
+    </div>
+  </div>
+
+  <div class="panel" id="payment-split-panel">
+    <h2>Today's Payment Split</h2>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      <div style="background:var(--bg); border:1px solid var(--panel-border); border-radius:10px; padding:14px;">
+        <div class="label" style="color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:0.04em;">Cash</div>
+        <div style="font-size:24px; font-weight:700; margin-top:4px;" id="stat-cash-total">—</div>
+        <div style="color:var(--muted); font-size:12px; margin-top:2px;"><span id="stat-cash-count">0</span> bills</div>
+      </div>
+      <div style="background:var(--bg); border:1px solid var(--panel-border); border-radius:10px; padding:14px;">
+        <div class="label" style="color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:0.04em;">GPay / UPI</div>
+        <div style="font-size:24px; font-weight:700; margin-top:4px;" id="stat-upi-total">—</div>
+        <div style="color:var(--muted); font-size:12px; margin-top:2px;"><span id="stat-upi-count">0</span> bills</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panels">
+    <div>
+      <div class="panel">
+        <h2>Tomorrow's Forecast</h2>
+        <table id="forecast-table">
+          <thead><tr><th>Menu Item</th><th>Predicted Qty</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="empty" id="forecast-empty" style="display:none;">No forecast run yet for tomorrow.</div>
+      </div>
+
+      <div class="panel">
+        <h2>Stock Levels — Low Stock First</h2>
+        <table id="stock-table">
+          <thead><tr><th>Ingredient</th><th>Current</th><th>Threshold</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="empty" id="stock-empty" style="display:none;">No ingredients found.</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Recent Agent Decisions</h2>
+        <div id="agent-log-list"></div>
+        <div class="empty" id="agent-log-empty" style="display:none;">No agent decisions logged yet.</div>
+      </div>
+
+      <div class="panel">
+        <h2>Latest Weekly Summary</h2>
+        <div class="summary-text" id="weekly-summary">No weekly summary generated yet — run <code>python manage.py generate_weekly_summary</code>.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function initTheme() {
+  const saved = localStorage.getItem('tasty-ops-theme') || 'dark';
+  document.documentElement.dataset.theme = saved;
+  const btn = document.getElementById('theme-toggle-btn');
+  if (btn) btn.textContent = saved === 'light' ? '🌙' : '☀️';
+}
+
+function toggleTheme() {
+  const current = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+  const next = current === 'light' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('tasty-ops-theme', next);
+  const btn = document.getElementById('theme-toggle-btn');
+  if (btn) btn.textContent = next === 'light' ? '🌙' : '☀️';
+}
+
+initTheme();
+
+async function getJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url} -> ${res.status}`);
+  return res.json();
+}
+
+function getCookie(name) {
+  const match = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+  return match ? match.pop() : '';
+}
+
+async function sendAgentLogWhatsApp(logId, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  try {
+    const res = await fetch(`/api/agent-logs/${logId}/send_whatsapp/`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-CSRFToken': getCookie('csrftoken'), 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Failed (${res.status})`);
+    }
+    loadDashboard();
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Send failed — retry';
+  }
+}
+
+function fmtMoney(n) {
+  return '₹' + Number(n).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+async function loadDashboard() {
+  // Today's sales
+  try {
+    const today = await getJSON('/api/bills/today/');
+    const payload = today.results || today; // handles paginated or flat shape
+    document.getElementById('stat-sales').textContent = fmtMoney(payload.total_sales || 0);
+    document.getElementById('stat-bill-count').textContent = payload.bill_count ?? 0;
+    document.getElementById('stat-cash-total').textContent = fmtMoney(payload.cash_total || 0);
+    document.getElementById('stat-cash-count').textContent = payload.cash_bill_count ?? 0;
+    document.getElementById('stat-upi-total').textContent = fmtMoney(payload.upi_total || 0);
+    document.getElementById('stat-upi-count').textContent = payload.upi_bill_count ?? 0;
+  } catch (e) {
+    document.getElementById('stat-sales').textContent = 'error';
+  }
+
+  // Low stock
+  try {
+    const low = await getJSON('/api/ingredients/low_stock/');
+    document.getElementById('stat-low-stock').textContent = low.count ?? 0;
+    const tbody = document.querySelector('#stock-table tbody');
+    tbody.innerHTML = '';
+    if (!low.ingredients || low.ingredients.length === 0) {
+      document.getElementById('stock-empty').style.display = 'block';
+    } else {
+      document.getElementById('stock-empty').style.display = 'none';
+      low.ingredients.forEach(ing => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${ing.name}</td><td>${ing.current_stock}<span class="badge unit"> ${ing.unit}</span></td><td>${ing.reorder_threshold}<span class="badge unit"> ${ing.unit}</span></td>`;
+        tbody.appendChild(tr);
+      });
+    }
+  } catch (e) {
+    document.getElementById('stat-low-stock').textContent = 'error';
+  }
+
+  // Tomorrow's forecast
+  try {
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+    const forecasts = await getJSON(`/api/forecasts/?forecast_date=${tomorrow}`);
+    const rows = forecasts.results || forecasts;
+    const tbody = document.querySelector('#forecast-table tbody');
+    tbody.innerHTML = '';
+    if (!rows || rows.length === 0) {
+      document.getElementById('forecast-empty').style.display = 'block';
+    } else {
+      document.getElementById('forecast-empty').style.display = 'none';
+      rows.forEach(f => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${f.menu_item_name}</td><td>${f.predicted_quantity}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+  } catch (e) {
+    document.getElementById('forecast-empty').style.display = 'block';
+  }
+
+  // Agent logs
+  try {
+    const logs = await getJSON('/api/agent-logs/');
+    const rows = (logs.results || logs).slice(0, 8);
+    const list = document.getElementById('agent-log-list');
+    list.innerHTML = '';
+    const criticalCount = (logs.results || logs).filter(l => l.decision === 'critical').length;
+    document.getElementById('stat-critical').textContent = criticalCount;
+
+    if (rows.length === 0) {
+      document.getElementById('agent-log-empty').style.display = 'block';
+    } else {
+      document.getElementById('agent-log-empty').style.display = 'none';
+      rows.forEach(log => {
+        const div = document.createElement('div');
+        div.className = 'decision-row';
+        const canSend = log.message_draft && log.action_taken === 'message_drafted';
+        const channelNote = log.action_taken === 'message_sent'
+          ? `<span class="badge unit"> via ${log.message_channel}</span>` : '';
+        div.innerHTML = `
+          <div class="decision-header">
+            <span class="ingredient">${log.ingredient_name}</span>
+            <span class="badge ${log.decision}">${log.decision.replace('_',' ')}</span>
+            ${channelNote}
+          </div>
+          <div class="reasoning">${log.reasoning}</div>
+        `;
+        if (canSend) {
+          const btn = document.createElement('button');
+          btn.textContent = 'Send via WhatsApp';
+          btn.style.cssText = 'margin-top:6px; background:#25D366; color:#0f1720; border:none; border-radius:6px; padding:5px 10px; font-size:12px; font-weight:600; cursor:pointer;';
+          btn.onclick = () => sendAgentLogWhatsApp(log.id, btn);
+          div.appendChild(btn);
+        }
+        list.appendChild(div);
+      });
+    }
+  } catch (e) {
+    document.getElementById('agent-log-empty').style.display = 'block';
+  }
+
+  // Weekly summary
+  try {
+    const summaries = await getJSON('/api/weekly-summaries/');
+    const rows = summaries.results || summaries;
+    if (rows && rows.length > 0) {
+      document.getElementById('weekly-summary').textContent = rows[0].summary_text;
+    }
+  } catch (e) {
+    // leave default placeholder text
+  }
+}
+
+loadDashboard();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('SW registration failed:', e));
+  });
+}
+</script>
+
+</body>
+</html>

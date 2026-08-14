@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+{% load static %}
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Billing — Tasty Zone Smart Ops</title>
+<link rel="manifest" href="/static/billing/manifest.json">
+<meta name="theme-color" content="#0f1720">
+<link rel="apple-touch-icon" href="/static/billing/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tasty Zone">
+<script src="{% static 'billing/vendor/qrcode.min.js' %}"></script>
+<style>
+  :root {
+    --bg: #0f1720; --panel: #17212c; --panel-border: #24313f;
+    --text: #e8edf2; --muted: #8a97a3; --accent: #ff8a3d;
+    --accent-2: #2dd4bf; --green: #34d399; --red: #f87171; --blue: #60a5fa;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f6f8; --panel: #ffffff; --panel-border: #dde3e8;
+    --text: #16202a; --muted: #5b6b78; --accent: #ff8a3d;
+    --accent-2: #0d7d70; --green: #059669; --red: #dc2626; --blue: #2563eb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 24px;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    max-width: 1150px; margin: 0 auto 20px; flex-wrap: wrap; gap: 12px;
+  }
+  header h1 { margin: 0; font-size: 22px; }
+  header h1 span { color: var(--accent); }
+  nav a { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: 14px; }
+  nav a:hover, nav a.active { color: var(--accent-2); }
+  .container { max-width: 1150px; margin: 0 auto; display: grid; grid-template-columns: 1.1fr 1fr; gap: 20px; }
+  @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 12px; padding: 18px 20px; margin-bottom: 20px; }
+  .panel h2 { font-size: 13px; margin: 0 0 14px; color: var(--accent-2); text-transform: uppercase; letter-spacing: 0.04em; }
+
+  .mode-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+  .mode-tabs button {
+    flex: 1; background: var(--bg); border: 1px solid var(--panel-border); color: var(--muted);
+    padding: 8px; border-radius: 8px; cursor: pointer; font-size: 13px;
+  }
+  .mode-tabs button.active { color: var(--text); border-color: var(--accent); }
+
+  .menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .menu-item-card {
+    background: var(--bg); border: 1px solid var(--panel-border); border-radius: 10px;
+    padding: 12px; cursor: pointer; text-align: left;
+  }
+  .menu-item-card:hover { border-color: var(--accent); }
+  .menu-item-card .name { font-weight: 600; font-size: 14px; }
+  .menu-item-card .price { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 4px; border-bottom: 1px solid var(--panel-border); }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; }
+
+  .order-card { background: var(--bg); border: 1px solid var(--panel-border); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+  .order-card.selected { border-color: var(--accent); }
+  .order-card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; cursor:pointer; }
+  .order-card-header .order-label { font-weight:700; font-size:14px; }
+  .order-card-header .order-label .tag { color:var(--muted); font-weight:400; font-size:12px; margin-left:6px; }
+
+  .subtotal-row { display: flex; justify-content: space-between; padding: 12px 0; font-size: 16px; font-weight: 700; border-top: 1px solid var(--panel-border); margin-top: 8px; }
+
+  .pay-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .pay-buttons button {
+    border: none; border-radius: 8px; padding: 13px; font-weight: 700; font-size: 14px; cursor: pointer;
+  }
+  .pay-buttons button:disabled { opacity: 0.35; cursor: not-allowed; }
+  .pay-cash-btn { background: var(--green); color: #0f1720; }
+  .pay-upi-btn { background: var(--blue); color: #0f1720; }
+
+  button.secondary {
+    width: 100%; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+    padding: 9px; color: var(--text); font-size: 13px; cursor: pointer; margin-top: 8px;
+  }
+  button.small { background: var(--accent); color: #0f1720; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; font-weight: 600; }
+
+  .empty { color: var(--muted); font-size: 13.5px; padding: 10px 0; }
+  .status-msg { font-size: 13px; margin-top: 10px; padding: 8px 10px; border-radius: 6px; display: none; }
+  .status-msg.error { background: rgba(248,113,113,0.15); color: var(--red); display: block; }
+  .status-msg.success { background: rgba(52,211,153,0.15); color: var(--green); display: block; }
+
+  .receipt {
+    background: var(--bg); border: 1px dashed var(--panel-border); border-radius: 8px;
+    padding: 16px; font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 13px; line-height: 1.7;
+  }
+  .receipt .line { display: flex; justify-content: space-between; }
+  .receipt hr { border: none; border-top: 1px dashed var(--panel-border); margin: 8px 0; }
+
+  .add-item-form { display: grid; grid-template-columns: 1.5fr 1fr 1fr auto; gap: 6px; margin-top: 14px; align-items: end; }
+  .add-item-form label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .add-item-form input, .add-item-form select {
+    width: 100%; background: var(--bg); border: 1px solid var(--panel-border); border-radius: 6px;
+    padding: 7px 8px; color: var(--text); font-size: 13px;
+  }
+  .toggle-inactive { opacity: 0.5; }
+
+  .qty-controls { display: flex; align-items: center; gap: 6px; }
+  .qty-btn {
+    width: 22px; height: 22px; border-radius: 5px; border: 1px solid var(--panel-border);
+    background: var(--bg); color: var(--text); cursor: pointer; font-size: 13px; line-height: 1; padding: 0;
+  }
+  .qty-btn:hover { border-color: var(--accent); }
+  .remove-item-btn { background: none; border: none; color: var(--red); cursor: pointer; font-size: 15px; padding: 0 4px; }
+
+  @media print {
+    header, nav, .panel h2, #order-panel, #menu-panel { display: none !important; }
+    body { background: white; color: black; padding: 0; }
+    .receipt { border: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div style="display:flex; align-items:center; gap:12px;">
+    <img id="shop-logo-img" src="{% if shop.logo %}{{ shop.logo.url }}{% else %}/static/billing/logo.png{% endif %}" alt="{{ shop.name|default:'Tasty Zone' }}" style="height:44px; width:44px; border-radius:50%; object-fit:cover;">
+    <h1>{{ shop.name|default:"Tasty Zone" }} <span>Billing</span></h1>
+  </div>
+  <nav>
+    <a href="/billing/" class="active">Billing</a>
+    <a href="/dashboard/">Dashboard</a>
+    <a href="#" onclick="openShopSettings(); return false;">Shop Settings</a>
+    <form method="post" action="/accounts/logout/" style="display:inline;">
+      {% csrf_token %}
+      <button type="submit" style="background:none; border:none; color:var(--muted); text-decoration:none; font-size:14px; margin-left:18px; cursor:pointer; font-family:inherit; padding:0;">Sign out</button>
+    </form>
+    <button id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle dark/light theme"
+      style="background:var(--panel); border:1px solid var(--panel-border); color:var(--text); padding:6px 10px; border-radius:8px; cursor:pointer; font-size:13px; margin-left:18px;">☀️</button>
+  </nav>
+</header>
+
+{{ shop.name|default:"Tasty Zone"|json_script:"shop-name-data" }}
+{{ shop.upi_id|default:""|json_script:"shop-upi-id-data" }}
+
+<div id="shop-settings-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:50; align-items:center; justify-content:center;">
+  <div class="panel" style="max-width:420px; width:90%;">
+    <h2>Shop Settings</h2>
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+      <img id="shop-settings-logo-preview" src="{% if shop.logo %}{{ shop.logo.url }}{% else %}/static/billing/logo.png{% endif %}" style="height:56px; width:56px; border-radius:50%; object-fit:cover; border:1px solid var(--panel-border);">
+      <div style="flex:1;">
+        <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">Shop logo</label>
+        <input type="file" id="shop-logo-input" accept="image/*" onchange="previewShopLogo()"
+          style="width:100%; font-size:12px; color:var(--text);">
+      </div>
+    </div>
+    <div style="margin-bottom:14px;">
+      <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">Your UPI ID (for GPay QR codes)</label>
+      <input type="text" id="shop-upi-id-input" value="{{ shop.upi_id|default:'' }}" placeholder="e.g. yourname@okhdfcbank"
+        style="width:100%; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; padding:7px 8px; color:var(--text); font-size:13px;">
+    </div>
+    <div style="margin-bottom:14px;">
+      <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">Location</label>
+      <div id="shop-location-display" style="font-size:13px; color:var(--muted); margin-bottom:8px;">
+        {% if shop.address %}{{ shop.address }}{% else %}Not set{% endif %}
+      </div>
+      <button class="secondary" style="margin-top:0;" onclick="useCurrentLocation()">Use my current location</button>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      <button class="secondary" style="margin-top:0;" onclick="closeShopSettings()">Cancel</button>
+      <button class="secondary" style="margin-top:0; background:var(--accent); color:#0f1720; border:none; font-weight:700;" onclick="saveShopSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="dining-mode-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:50; align-items:center; justify-content:center;">
+  <div class="panel" style="max-width:340px; width:90%; text-align:center;">
+    <h2>Dine-in or Takeaway?</h2>
+    <div style="color:var(--muted); font-size:13px; margin-bottom:16px;">Takeaway adds &#8377;5 per item for packing.</div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+      <button class="secondary" style="margin-top:0; background:var(--accent); color:#0f1720; border:none; font-weight:700; padding:16px;" onclick="chooseDiningMode('dine-in')">Dine-in</button>
+      <button class="secondary" style="margin-top:0; background:var(--accent); color:#0f1720; border:none; font-weight:700; padding:16px;" onclick="chooseDiningMode('takeaway')">Takeaway (+&#8377;5/item)</button>
+    </div>
+    <button class="secondary" onclick="cancelDiningModePrompt()">Cancel</button>
+  </div>
+</div>
+
+<div id="gpay-qr-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:50; align-items:center; justify-content:center;">
+  <div class="panel" style="max-width:340px; width:90%; text-align:center;">
+    <h2>Scan to Pay</h2>
+    <div id="gpay-qr-amount" style="font-size:28px; font-weight:700; margin-bottom:14px;"></div>
+    <div id="gpay-qr-canvas-wrap" style="display:flex; justify-content:center; margin-bottom:14px;"></div>
+    <div id="gpay-qr-no-upi" class="empty" style="display:none;">
+      No UPI ID set up yet — add one under Shop Settings, or just mark this paid once you've collected payment another way.
+    </div>
+    <button class="secondary" style="margin-top:0; background:var(--green); color:#0f1720; border:none; font-weight:700;" onclick="confirmGpayPayment()">Payment received — mark as paid</button>
+    <button class="secondary" onclick="closeGpayQr()">Cancel</button>
+  </div>
+</div>
+
+<div class="container">
+  <div id="menu-panel" class="panel">
+    <div class="mode-tabs">
+      <button id="mode-order-btn" class="active" onclick="setMode('order')">Take Orders</button>
+      <button id="mode-manage-btn" onclick="setMode('manage')">Manage Menu</button>
+    </div>
+
+    <div id="order-mode-view">
+      <div class="menu-grid" id="menu-grid"></div>
+    </div>
+
+    <div id="manage-mode-view" style="display:none;">
+      <table>
+        <thead><tr><th>Name</th><th>Price</th><th>Category</th><th>Active</th><th></th></tr></thead>
+        <tbody id="manage-items-body"></tbody>
+      </table>
+      <div class="add-item-form">
+        <div><label>Name</label><input type="text" id="new-item-name" placeholder="e.g. Sundal"></div>
+        <div><label>Category</label>
+          <select id="new-item-category">
+            <option value="starter">Starter</option>
+            <option value="main">Main</option>
+            <option value="beverage">Beverage</option>
+            <option value="dessert">Dessert</option>
+            <option value="other" selected>Other</option>
+          </select>
+        </div>
+        <div><label>Price &#8377;</label><input type="number" id="new-item-price" step="0.01" min="0"></div>
+        <button class="small" onclick="addMenuItem()">Add</button>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div id="order-panel" class="panel">
+      <h2>Orders</h2>
+      <button class="secondary" style="margin-top:0; margin-bottom:14px; border-color:var(--accent); color:var(--accent); width:auto; padding:8px 16px;" onclick="startNewOrder()">+ New Order</button>
+      <button id="voice-order-btn" class="secondary" style="margin-top:0; margin-bottom:14px; margin-left:8px; width:auto; padding:8px 16px;" onclick="toggleVoiceOrder()">🎤 Voice add</button>
+      <div id="voice-order-status" style="font-size:12px; color:var(--muted); margin-bottom:8px; display:none;"></div>
+      <div id="orders-list"></div>
+      <div id="no-orders-msg" class="empty" style="display:none;">No open orders. Tap "+ New Order" to start one.</div>
+      <div id="status-msg" class="status-msg"></div>
+    </div>
+
+    <div class="panel" id="receipt-panel" style="display:none;">
+      <h2>Receipt</h2>
+      <div class="receipt" id="receipt-content"></div>
+      <button class="secondary" onclick="window.print()">Print</button>
+      <button class="secondary" id="whatsapp-bill-btn" onclick="sendBillOnWhatsapp()" style="background:#25D366; color:#0f1720; border:none; font-weight:700;">Send bill on WhatsApp</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function initTheme() {
+  const saved = localStorage.getItem('tasty-ops-theme') || 'dark';
+  document.documentElement.dataset.theme = saved;
+  const btn = document.getElementById('theme-toggle-btn');
+  if (btn) btn.textContent = saved === 'light' ? '🌙' : '☀️';
+}
+
+function toggleTheme() {
+  const current = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+  const next = current === 'light' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('tasty-ops-theme', next);
+  const btn = document.getElementById('theme-toggle-btn');
+  if (btn) btn.textContent = next === 'light' ? '🌙' : '☀️';
+}
+
+initTheme();
+
+const SHOP_NAME = JSON.parse(document.getElementById('shop-name-data').textContent);
+let SHOP_UPI_ID = JSON.parse(document.getElementById('shop-upi-id-data').textContent);
+
+let menuItemsById = {};
+let openOrders = {};      // orderId -> order object (with items)
+let activeOrderId = null; // which order new menu taps add items to
+let orderDiningMode = {}; // orderId -> 'dine-in' | 'takeaway', decided once at checkout
+let pendingCheckoutAction = null; // { orderId, method } while the dine-in/takeaway modal is open
+
+function getCookie(name) {
+  const match = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+  return match ? match.pop() : '';
+}
+
+async function api(url, options = {}) {
+  const opts = { credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...options };
+  if (options.method && options.method !== 'GET') {
+    opts.headers['X-CSRFToken'] = getCookie('csrftoken');
+  }
+  const res = await fetch(url, opts);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || JSON.stringify(body) || `Request failed (${res.status})`);
+  }
+  return res.json();
+}
+
+function fmt(n) { return '\u20B9' + Number(n).toFixed(2); }
+
+function showStatus(msg, type) {
+  const el = document.getElementById('status-msg');
+  el.textContent = msg;
+  el.className = 'status-msg ' + type;
+  setTimeout(() => { el.className = 'status-msg'; }, 4000);
+}
+
+function setMode(mode) {
+  document.getElementById('order-mode-view').style.display = mode === 'order' ? 'block' : 'none';
+  document.getElementById('manage-mode-view').style.display = mode === 'manage' ? 'block' : 'none';
+  document.getElementById('mode-order-btn').classList.toggle('active', mode === 'order');
+  document.getElementById('mode-manage-btn').classList.toggle('active', mode === 'manage');
+  if (mode === 'manage') loadManageMenu();
+}
+
+async function loadMenuGrid() {
+  const data = await api('/api/menu-items/?active_only=true');
+  const items = data.results || data;
+  const grid = document.getElementById('menu-grid');
+  grid.innerHTML = '';
+  items.forEach(item => {
+    menuItemsById[item.id] = item;
+    const card = document.createElement('div');
+    card.className = 'menu-item-card';
+    const baseBtn = document.createElement('button');
+    baseBtn.type = 'button';
+    baseBtn.style.cssText = 'background:none; border:none; padding:0; text-align:left; width:100%; cursor:pointer; color:inherit;';
+    baseBtn.innerHTML = `<div class="name">${item.name}</div><div class="price">${fmt(item.price)}</div>`;
+    baseBtn.onclick = () => addItemToActiveOrder(item.id, {});
+    card.appendChild(baseBtn);
+
+    if (item.supports_fried_option) {
+      const friedBtn = document.createElement('button');
+      friedBtn.type = 'button';
+      friedBtn.textContent = `Fried +${fmt(20)}`;
+      friedBtn.style.cssText = 'margin-top:6px; width:100%; background:var(--panel-border); border:none; border-radius:6px; padding:4px; font-size:11px; color:var(--text); cursor:pointer;';
+      friedBtn.onclick = (e) => { e.stopPropagation(); addItemToActiveOrder(item.id, { is_fried: true }); };
+      card.appendChild(friedBtn);
+    }
+    if (item.supports_cheese_option) {
+      const cheeseBtn = document.createElement('button');
+      cheeseBtn.type = 'button';
+      cheeseBtn.textContent = `+ Cheese +${fmt(20)}`;
+      cheeseBtn.style.cssText = 'margin-top:6px; width:100%; background:var(--panel-border); border:none; border-radius:6px; padding:4px; font-size:11px; color:var(--text); cursor:pointer;';
+      cheeseBtn.onclick = (e) => { e.stopPropagation(); addItemToActiveOrder(item.id, { has_extra_cheese: true }); };
+      card.appendChild(cheeseBtn);
+    }
+    grid.appendChild(card);
+  });
+}
+
+async function loadManageMenu() {
+  const data = await api('/api/menu-items/');
+  const items = data.results || data;
+  const tbody = document.getElementById('manage-items-body');
+  tbody.innerHTML = '';
+  items.forEach(item => {
+    const tr = document.createElement('tr');
+    if (!item.is_active) tr.classList.add('toggle-inactive');
+    tr.innerHTML = `
+      <td><input type="text" value="${item.name}" data-field="name" style="width:100%; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; color:var(--text); padding:5px 6px;"></td>
+      <td><input type="number" value="${item.price}" data-field="price" step="0.01" style="width:80px; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; color:var(--text); padding:5px 6px;"></td>
+      <td>${item.category}</td>
+      <td><input type="checkbox" data-field="is_active" ${item.is_active ? 'checked' : ''}></td>
+      <td></td>
+    `;
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'small';
+    saveBtn.textContent = 'Save';
+    saveBtn.onclick = () => saveMenuItem(item.id, tr);
+    tr.lastElementChild.appendChild(saveBtn);
+    tbody.appendChild(tr);
+  });
+}
+
+async function saveMenuItem(id, row) {
+  const name = row.querySelector('[data-field="name"]').value;
+  const price = row.querySelector('[data-field="price"]').value;
+  const is_active = row.querySelector('[data-field="is_active"]').checked;
+  try {
+    await api(`/api/menu-items/${id}/`, { method: 'PATCH', body: JSON.stringify({ name, price, is_active }) });
+    showStatus('Menu item updated.', 'success');
+    loadManageMenu();
+    loadMenuGrid();
+  } catch (e) {
+    showStatus(e.message, 'error');
+  }
+}
+
+async function addMenuItem() {
+  const name = document.getElementById('new-item-name').value.trim();
+  const category = document.getElementById('new-item-category').value;
+  const price = document.getElementById('new-item-price').value;
+  if (!name || !price) { showStatus('Name and price are required.', 'error'); return; }
+  try {
+    await api('/api/menu-items/', { method: 'POST', body: JSON.stringify({ name, category, price }) });
+    document.getElementById('new-item-name').value = '';
+    document.getElementById('new-item-price').value = '';
+    showStatus(`Added "${name}" to the menu.`, 'success');
+    loadManageMenu();
+    loadMenuGrid();
+  } catch (e) {
+    showStatus(e.message, 'error');
+  }
+}
+
+async function loadOpenOrders() {
+  const data = await api('/api/orders/?status=open');
+  const orders = data.results || data;
+  openOrders = {};
+  orders.forEach(o => { openOrders[o.id] = o; });
+  if (orders.length > 0 && !activeOrderId) activeOrderId = orders[0].id;
+  renderOrdersList();
+}
+
+async function startNewOrder() {
+  try {
+    const order = await api('/api/orders/', { method: 'POST', body: JSON.stringify({}) });
+    openOrders[order.id] = order;
+    activeOrderId = order.id;
+    renderOrdersList();
+  } catch (e) {
+    showStatus(e.message, 'error');
+  }
+}
+
+async function addItemToActiveOrder(menuItemId, modifiers = {}) {
+  if (!activeOrderId) { await startNewOrder(); }
+  if (!activeOrderId) return;
+  try {
+    const body = {
+      menu_item: menuItemId,
+      quantity: 1,
+      is_fried: !!modifiers.is_fried,
+      has_extra_cheese: !!modifiers.has_extra_cheese,
+    };
+    const order = await api(`/api/orders/${activeOrderId}/add_items/`, {
+      method: 'POST', body: JSON.stringify(body),
+    });
+    openOrders[activeOrderId] = order;
+    renderOrdersList();
+  } catch (e) {
+    showStatus(e.message, 'error');
+  }
+}
+
+function selectOrder(orderId) {
+  activeOrderId = orderId;
+  renderOrdersList();
+}
+
+async function saveCustomerInfo(orderId) {
+  const customer_name = document.getElementById(`customer-name-${orderId}`).value.trim();
+  const customer_phone = document.getElementById(`customer-phone-${orderId}`).value.trim();
+  try {
+    const order = await api(`/api/orders/${orderId}/`, {
+      method: 'PATCH', body: JSON.stringify({ customer_name, customer_phone }),
+    });
+    openOrders[orderId] = order;
+  } catch (e) {
+    showStatus(e.message, 'error');
+  }
+}
+
+function renderOrdersList() {
+  const container = document.getElementById('orders-list');
+  const noOrdersMsg = document.getElementById('no-orders-msg');
+  const orders = Object.values(openOrders).sort((a, b) => a.id - b.id);
+  container.innerHTML = '';
+  noOrdersMsg.style.display = orders.length === 0 ? 'block' : 'none';
+
+  orders.forEach(order => {
+    const card = document.createElement('div');
+    card.className = 'order-card' + (order.id === activeOrderId ? ' selected' : '');
+
+    const label = order.customer_name
+      ? `${order.customer_name} <span class="tag">Order ${order.daily_number}</span>`
+      : (order.table_or_token || `Order ${order.daily_number}`);
+    const hasItems = order.items && order.items.length > 0;
+
+    const diningLabel = orderDiningMode[order.id]
+      ? `<span style="color:var(--muted); font-size:12px; margin-left:8px;">(${orderDiningMode[order.id] === 'takeaway' ? 'Takeaway' : 'Dine-in'})</span>`
+      : '';
+
+    card.innerHTML = `
+      <div class="order-card-header" data-action="select">
+        <div class="order-label">${label}${diningLabel}</div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
+        <div>
+          <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">Customer name</label>
+          <input type="text" id="customer-name-${order.id}" value="${order.customer_name || ''}" placeholder="Optional"
+            style="width:100%; background:var(--panel); border:1px solid var(--panel-border); border-radius:6px; padding:7px 8px; color:var(--text); font-size:13px;">
+        </div>
+        <div>
+          <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">Phone (WhatsApp)</label>
+          <input type="text" id="customer-phone-${order.id}" value="${order.customer_phone || ''}" placeholder="e.g. 9876543210"
+            style="width:100%; background:var(--panel); border:1px solid var(--panel-border); border-radius:6px; padding:7px 8px; color:var(--text); font-size:13px;">
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Item</th><th>Qty</th><th>Total</th><th></th></tr></thead>
+        <tbody>${renderItemRows(order)}</tbody>
+      </table>
+      <div class="subtotal-row"><span>Total</span><span>${fmt(order.subtotal || 0)}</span></div>
+      <div class="pay-buttons">
+        <button class="pay-cash-btn" data-action="pay-cash" ${hasItems ? '' : 'disabled'}>Cash</button>
+        <button class="pay-upi-btn" data-action="pay-upi" ${hasItems ? '' : 'disabled'}>GPay / UPI</button>
+      </div>
+      <button class="secondary" data-action="cancel">Cancel this order</button>
+    `;
+
+    card.querySelector('[data-action="select"]').addEventListener('click', () => selectOrder(order.id));
+    card.querySelector(`#customer-name-${order.id}`).addEventListener('change', () => saveCustomerInfo(order.id));
+    card.querySelector(`#customer-phone-${order.id}`).addEventListener('change', () => saveCustomerInfo(order.id));
+    card.querySelectorAll('[data-action="inc"], [data-action="dec"], [data-action="remove"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const menuItemId = Number(btn.dataset.menuItem);
+        const mods = JSON.parse(btn.dataset.mods);
+        const item = (order.items || []).find(i =>
+          i.menu_item === menuItemId && i.is_parcel === mods.is_parcel &&
+          i.is_fried === mods.is_fried && i.has_extra_cheese === mods.has_extra_cheese
+        );
+        const currentQty = item ? item.quantity : 0;
+        let newQty = currentQty;
+        if (btn.dataset.action === 'inc') newQty = currentQty + 1;
+        if (btn.dataset.action === 'dec') newQty = currentQty - 1;
+        if (btn.dataset.action === 'remove') newQty = 0;
+        adjustItemQuantity(order.id, menuItemId, newQty, mods);
+      });
+    });
+    card.querySelector('[data-action="pay-cash"]').addEventListener('click', () => initiateCheckout(order.id, 'cash'));
+    card.querySelector('[data-action="pay-upi"]').addEventListener('click', () => initiateCheckout(order.id, 'upi'));
+    card.querySelector('[data-action="cancel"]').addEventListener('click', () => cancelOrder(order.id));
+
+    container.appendChild(card);
+  });
+}
+
+function renderItemRows(order) {
+  if (!order.items || order.items.length === 0) {
+    return '<tr><td colspan="4" class="empty">No items yet — tap the menu to add.</td></tr>';
+  }
+  return order.items.map(item => {
+    const mods = JSON.stringify({ is_parcel: item.is_parcel, is_fried: item.is_fried, has_extra_cheese: item.has_extra_cheese })
+      .replace(/"/g, '&quot;');
+    return `
+      <tr>
+        <td>${item.display_name || item.menu_item_name}</td>
+        <td>
+          <div class="qty-controls">
+            <button class="qty-btn" data-action="dec" data-menu-item="${item.menu_item}" data-mods="${mods}">−</button>
+            <span>${item.quantity}</span>
+            <button class="qty-btn" data-action="inc" data-menu-item="${item.menu_item}" data-mods="${mods}">+</button>
+          </div>
+        </td>
+        <td>${fmt(item.line_total)}</td>
+        <td><button class="remove-item-btn" data-action="remove" data-menu-item="${item.menu_item}" data-mods="${mods}">✕</button></td>
+      </tr>`;
+  }).join('');
+}
+
+async function adjustItemQuantity(orderId, menuItemId, newQuantity, mods = {}) {
+  try {
+    const body = {
+      menu_item: menuItemId,
+      quantity: Math.max(0, newQuantity),
+      is_parcel: !!mods.is_parcel,
+      is_fried: !!mods.is_fried,
+      has_extra_cheese: !!mods.has_extra_cheese,
+    };
+    const order = await api(`/api/orders/${orderId}/set_item_quantity/`, {
+      method: 'POST', body: JSON.stringify(body),
+    });
+    openOrders[orderId] = order;
+    renderOrdersList();
+  } catch (e) {
+    showStatus(e.message, 'error');
+  }
+}
+
+function initiateCheckout(orderId, method) {
+  if (orderDiningMode[orderId]) {
+    proceedToPayment(orderId, method);
+    return;
+  }
+  pendingCheckoutAction = { orderId, method };
+  document.getElementById('dining-mode-modal').style.display = 'flex';
+}
+
+async function chooseDiningMode(mode) {
+  document.getElementById('dining-mode-modal').style.display = 'none';
+  if (!pendingCheckoutAction) return;
+  const { orderId, method } = pendingCheckoutAction;
+  pendingCheckoutAction = null;
+  try {
+    const order = await api(`/api/orders/${orderId}/set_dining_mode/`, {
+      method: 'POST', body: JSON.stringify({ is_parcel: mode === 'takeaway' }),
+    });
+    openOrders[orderId] = order;
+    orderDiningMode[orderId] = mode;
+    renderOrdersList();
+    proceedToPayment(orderId, method);
+  } catch (e) {
+    showStatus(e.message, 'error');
+  }
+}
+
+function proceedToPayment(orderId, method) {
+  const order = openOrders[orderId];
+  if (!order) return;
+  if (method === 'cash') {
+    payAndBill(orderId, 'cash');
+  } else {
+    openGpayQr(orderId, order.subtotal);
+  }
+}
+
+function cancelDiningModePrompt() {
+  document.getElementById('dining-mode-modal').style.display = 'none';
+  pendingCheckoutAction = null;
+}
+
+async function payAndBill(orderId, paymentMethod) {
+  try {
+    const bill = await api(`/api/orders/${orderId}/generate_bill/`, {
+      method: 'POST', body: JSON.stringify({ payment_method: paymentMethod }),
+    });
+    delete openOrders[orderId];
+    delete orderDiningMode[orderId];
+    if (activeOrderId === orderId) {
+      activeOrderId = Object.keys(openOrders)[0] ? Number(Object.keys(openOrders)[0]) : null;
+    }
+    renderOrdersList();
+    showReceipt(bill);
+    showStatus('Bill generated.', 'success');
+  } catch (e) {
+    showStatus(e.message, 'error');
+  }
+}
+
+let gpayPendingOrderId = null;
+
+function openGpayQr(orderId, amount) {
+  gpayPendingOrderId = orderId;
+  document.getElementById('gpay-qr-amount').textContent = fmt(amount);
+  const canvasWrap = document.getElementById('gpay-qr-canvas-wrap');
+  const noUpiMsg = document.getElementById('gpay-qr-no-upi');
+  canvasWrap.innerHTML = '';
+
+  // Show the popup FIRST — everything below is best-effort QR generation,
+  // and a failure there should never stop the popup (with its "mark as
+  // paid" button) from appearing.
+  document.getElementById('gpay-qr-modal').style.display = 'flex';
+
+  if (!SHOP_UPI_ID) {
+    noUpiMsg.textContent = 'No UPI ID set up yet — add one under Shop Settings, or just mark this paid once you\'ve collected payment another way.';
+    noUpiMsg.style.display = 'block';
+    return;
+  }
+  noUpiMsg.style.display = 'none';
+
+  try {
+    if (typeof QRCode === 'undefined') {
+      throw new Error('QR library did not load (check your internet connection).');
+    }
+    const upiUrl = `upi://pay?pa=${encodeURIComponent(SHOP_UPI_ID)}&pn=${encodeURIComponent(SHOP_NAME)}&am=${encodeURIComponent(Number(amount).toFixed(2))}&cu=INR&tn=${encodeURIComponent('Order payment')}`;
+    const canvas = document.createElement('canvas');
+    canvasWrap.appendChild(canvas);
+    QRCode.toCanvas(canvas, upiUrl, { width: 220, margin: 1 }, (err) => {
+      if (err) {
+        canvasWrap.innerHTML = '';
+        noUpiMsg.textContent = 'Could not generate the QR code. You can still mark this as paid manually once you\'ve collected payment.';
+        noUpiMsg.style.display = 'block';
+      }
+    });
+  } catch (e) {
+    canvasWrap.innerHTML = '';
+    noUpiMsg.textContent = 'Could not generate the QR code (' + e.message + '). You can still mark this as paid manually once you\'ve collected payment.';
+    noUpiMsg.style.display = 'block';
+  }
+}
+
+function closeGpayQr() {
+  document.getElementById('gpay-qr-modal').style.display = 'none';
+  gpayPendingOrderId = null;
+}
+
+function confirmGpayPayment() {
+  if (!gpayPendingOrderId) return;
+  const orderId = gpayPendingOrderId;
+  document.getElementById('gpay-qr-modal').style.display = 'none';
+  gpayPendingOrderId = null;
+  payAndBill(orderId, 'upi');
+}
+
+async function cancelOrder(orderId) {
+  if (!window.confirm('Cancel this order? This cannot be undone.')) return;
+  try {
+    await api(`/api/orders/${orderId}/`, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) });
+    delete openOrders[orderId];
+    delete orderDiningMode[orderId];
+    if (activeOrderId === orderId) {
+      activeOrderId = Object.keys(openOrders)[0] ? Number(Object.keys(openOrders)[0]) : null;
+    }
+    renderOrdersList();
+  } catch (e) {
+    showStatus(e.message, 'error');
+  }
+}
+
+
+let lastBill = null;
+
+function showReceipt(bill) {
+  lastBill = bill;
+  document.getElementById('receipt-panel').style.display = 'block';
+  const lines = (bill.order.items || []).map(
+    i => `<div class="line"><span>${i.display_name || i.menu_item_name} x${i.quantity}</span><span>${fmt(i.line_total)}</span></div>`
+  ).join('');
+  const paymentLabel = bill.payment_method === 'upi' ? 'GPay / UPI' : bill.payment_method === 'cash' ? 'Cash' : 'Other';
+  const taxLine = Number(bill.tax_amount) > 0
+    ? `<div class="line"><span>Tax (${bill.tax_rate}%)</span><span>${fmt(bill.tax_amount)}</span></div>`
+    : '';
+  document.getElementById('receipt-content').innerHTML = `
+    <div>${SHOP_NAME}</div>
+    <div>Bill #${bill.id} — ${new Date(bill.created_at).toLocaleString('en-IN')}</div>
+    <hr>
+    ${lines}
+    <hr>
+    <div class="line"><span>Subtotal</span><span>${fmt(bill.subtotal)}</span></div>
+    ${taxLine}
+    <div class="line"><strong>Total</strong><strong>${fmt(bill.total)}</strong></div>
+    <div class="line"><span>Paid via</span><span>${paymentLabel}</span></div>
+  `;
+}
+
+function sendBillOnWhatsapp() {
+  if (!lastBill) return;
+  let phone = (lastBill.order.customer_phone || '').replace(/[^0-9]/g, '');
+  if (!phone) {
+    phone = (window.prompt('Customer phone number (with country code, e.g. 919876543210):') || '').replace(/[^0-9]/g, '');
+    if (!phone) return;
+  }
+  // If a plain 10-digit number was entered/saved, assume India (+91) —
+  // wa.me needs the full country code with no leading 0 or +.
+  if (phone.length === 10) phone = '91' + phone;
+
+  const lines = (lastBill.order.items || []).map(
+    i => `${i.display_name || i.menu_item_name} x${i.quantity} - ${fmt(i.line_total)}`
+  ).join('\n');
+  const paymentLabel = lastBill.payment_method === 'upi' ? 'GPay / UPI' : lastBill.payment_method === 'cash' ? 'Cash' : 'Other';
+  const text =
+    `*${SHOP_NAME}*\n` +
+    `Bill #${lastBill.id} - ${new Date(lastBill.created_at).toLocaleString('en-IN')}\n\n` +
+    `${lines}\n\n` +
+    `Subtotal: ${fmt(lastBill.subtotal)}\n` +
+    (Number(lastBill.tax_amount) > 0 ? `Tax: ${fmt(lastBill.tax_amount)}\n` : '') +
+    `*Total: ${fmt(lastBill.total)}*\n` +
+    `Paid via: ${paymentLabel}\n\n` +
+    `Thank you for your order!`;
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank');
+}
+
+let pendingShopLocation = null;
+
+function openShopSettings() {
+  document.getElementById('shop-settings-modal').style.display = 'flex';
+}
+
+function closeShopSettings() {
+  document.getElementById('shop-settings-modal').style.display = 'none';
+}
+
+function previewShopLogo() {
+  const input = document.getElementById('shop-logo-input');
+  if (!input.files || !input.files[0]) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    document.getElementById('shop-settings-logo-preview').src = e.target.result;
+  };
+  reader.readAsDataURL(input.files[0]);
+}
+
+function useCurrentLocation() {
+  if (!('geolocation' in navigator)) {
+    showStatus('Location is not available on this device/browser.', 'error');
+    return;
+  }
+  document.getElementById('shop-location-display').textContent = 'Getting location…';
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      pendingShopLocation = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+      document.getElementById('shop-location-display').textContent =
+        `${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}`;
+    },
+    (err) => {
+      document.getElementById('shop-location-display').textContent = 'Not set';
+      showStatus('Could not get location: ' + err.message, 'error');
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+
+async function saveShopSettings() {
+  const formData = new FormData();
+  const logoInput = document.getElementById('shop-logo-input');
+  if (logoInput.files && logoInput.files[0]) {
+    formData.append('logo', logoInput.files[0]);
+  }
+  formData.append('upi_id', document.getElementById('shop-upi-id-input').value.trim());
+  if (pendingShopLocation) {
+    formData.append('latitude', pendingShopLocation.latitude);
+    formData.append('longitude', pendingShopLocation.longitude);
+    formData.append('address', document.getElementById('shop-location-display').textContent);
+  }
+  try {
+    const res = await fetch('/shop-settings/', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-CSRFToken': getCookie('csrftoken') },
+      body: formData,
+    });
+    if (!res.ok) throw new Error('Save failed (' + res.status + ')');
+    const data = await res.json();
+    if (data.logo_url) {
+      document.getElementById('shop-logo-img').src = data.logo_url;
+      document.getElementById('shop-settings-logo-preview').src = data.logo_url;
+    }
+    SHOP_UPI_ID = data.upi_id || '';
+    closeShopSettings();
+    showStatus('Shop settings saved.', 'success');
+  } catch (e) {
+    showStatus(e.message, 'error');
+  }
+}
+
+
+let voiceRecognition = null;
+let voiceListening = false;
+
+function getVoiceRecognitionClass() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function toggleVoiceOrder() {
+  const RecognitionClass = getVoiceRecognitionClass();
+  const statusEl = document.getElementById('voice-order-status');
+  const btn = document.getElementById('voice-order-btn');
+
+  if (!RecognitionClass) {
+    statusEl.style.display = 'block';
+    statusEl.textContent = 'Voice ordering needs Chrome (desktop or Android) — not supported in this browser.';
+    return;
+  }
+
+  if (voiceListening) {
+    voiceRecognition.stop();
+    return;
+  }
+
+  voiceRecognition = new RecognitionClass();
+  voiceRecognition.lang = 'en-IN';
+  voiceRecognition.interimResults = false;
+  voiceRecognition.maxAlternatives = 1;
+
+  voiceRecognition.onstart = () => {
+    voiceListening = true;
+    btn.textContent = '🎤 Listening…';
+    statusEl.style.display = 'block';
+    statusEl.textContent = 'Listening — say something like "two chicken burgers extra cheese".';
+  };
+
+  voiceRecognition.onerror = (event) => {
+    statusEl.textContent = 'Voice error: ' + event.error;
+  };
+
+  voiceRecognition.onend = () => {
+    voiceListening = false;
+    btn.textContent = '🎤 Voice add';
+  };
+
+  voiceRecognition.onresult = async (event) => {
+    const text = event.results[0][0].transcript;
+    statusEl.textContent = `Heard: "${text}" — adding…`;
+    await sendVoiceOrderText(text);
+  };
+
+  voiceRecognition.start();
+}
+
+async function sendVoiceOrderText(text) {
+  const statusEl = document.getElementById('voice-order-status');
+  if (!activeOrderId) {
+    await startNewOrder();
+  }
+  if (!activeOrderId) return;
+
+  try {
+    const result = await api(`/api/orders/${activeOrderId}/voice_add/`, {
+      method: 'POST', body: JSON.stringify({ text }),
+    });
+    openOrders[activeOrderId] = result.order;
+    renderOrdersList();
+
+    const addedNames = result.added.map(a => `${a.quantity}x ${a.menu_item}`).join(', ');
+    if (result.added.length && !result.needs_review.length) {
+      statusEl.textContent = `Added: ${addedNames}`;
+    } else if (result.added.length && result.needs_review.length) {
+      const unclear = result.needs_review.map(r => `"${r.raw}"`).join(', ');
+      statusEl.textContent = `Added: ${addedNames}. Couldn't confidently match: ${unclear} — add manually from the menu.`;
+    } else if (result.needs_review.length) {
+      const unclear = result.needs_review.map(r => `"${r.raw}"`).join(', ');
+      statusEl.textContent = `Didn't recognize any menu item in: ${unclear} — try again or tap it on the menu.`;
+    } else {
+      statusEl.textContent = 'Didn\'t catch an item in that — try again.';
+    }
+  } catch (e) {
+    statusEl.textContent = e.message;
+  }
+}
+
+loadMenuGrid();
+loadOpenOrders();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('SW registration failed:', e));
+  });
+}
+</script>
+
+</body>
+</html>
