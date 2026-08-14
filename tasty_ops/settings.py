@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 from pathlib import Path
 from decouple import config
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -27,6 +28,17 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-78ar06r+zinrt7u^$rq8&
 DEBUG = config('DEBUG', default=True, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=lambda v: [s.strip() for s in v.split(',')])
+
+# Render (and most cloud hosts) terminate HTTPS at a proxy and forward to
+# your app as plain HTTP — without this, Django thinks every request is
+# insecure, which breaks CSRF checks on every POST (login, logout, forms).
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# Needed alongside ALLOWED_HOSTS for CSRF to trust your live https:// domain.
+CSRF_TRUSTED_ORIGINS = config(
+    'CSRF_TRUSTED_ORIGINS', default='',
+    cast=lambda v: [s.strip() for s in v.split(',') if s.strip()],
+)
 
 
 # Application definition
@@ -45,6 +57,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -78,7 +91,13 @@ WSGI_APPLICATION = 'tasty_ops.wsgi.application'
 
 # Uses PostgreSQL by default. If you don't have Postgres set up yet and just
 # want to try the API immediately, set USE_SQLITE=True in your .env file.
-if config('USE_SQLITE', default=False, cast=bool):
+# In production (e.g. Render, Railway), a DATABASE_URL env var is provided
+# automatically by the Postgres addon and takes priority over everything else.
+if config('DATABASE_URL', default=''):
+    DATABASES = {
+        'default': dj_database_url.config(conn_max_age=600, ssl_require=not DEBUG)
+    }
+elif config('USE_SQLITE', default=False, cast=bool):
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
@@ -133,6 +152,12 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STORAGES = {
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
