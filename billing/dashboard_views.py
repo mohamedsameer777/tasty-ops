@@ -70,29 +70,42 @@ class ShopSettingsView(LoginRequiredMixin, View):
     Returns the updated shop as JSON.
     """
     def post(self, request):
+        import logging
+        from decimal import Decimal, InvalidOperation
         from .tenancy import get_shop_for_user
+
+        logger = logging.getLogger(__name__)
         shop = get_shop_for_user(request.user)
         if shop is None:
             return JsonResponse({'detail': 'No shop found for this account.'}, status=400)
 
-        if 'logo' in request.FILES:
-            shop.logo = request.FILES['logo']
+        try:
+            if 'logo' in request.FILES:
+                shop.logo = request.FILES['logo']
 
-        latitude = request.POST.get('latitude')
-        longitude = request.POST.get('longitude')
-        if latitude and longitude:
-            shop.latitude = latitude
-            shop.longitude = longitude
+            latitude = request.POST.get('latitude')
+            longitude = request.POST.get('longitude')
+            if latitude and longitude:
+                try:
+                    # Round to 6 decimal places ourselves so a browser sending
+                    # 15+ decimal digits can never overflow the DB column.
+                    shop.latitude = Decimal(latitude).quantize(Decimal('0.000001'))
+                    shop.longitude = Decimal(longitude).quantize(Decimal('0.000001'))
+                except InvalidOperation:
+                    logger.warning("Ignoring unparseable lat/lng: %r, %r", latitude, longitude)
 
-        address = request.POST.get('address')
-        if address is not None:
-            shop.address = address
+            address = request.POST.get('address')
+            if address is not None:
+                shop.address = address[:255]
 
-        upi_id = request.POST.get('upi_id')
-        if upi_id is not None:
-            shop.upi_id = upi_id.strip()
+            upi_id = request.POST.get('upi_id')
+            if upi_id is not None:
+                shop.upi_id = upi_id.strip()
 
-        shop.save()
+            shop.save()
+        except Exception:
+            logger.exception("shop-settings save failed for shop id=%s", shop.id)
+            return JsonResponse({'detail': 'Could not save shop settings. Check the server logs.'}, status=500)
 
         return JsonResponse({
             'name': shop.name,

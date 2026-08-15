@@ -58,9 +58,29 @@
   .menu-item-card:hover { border-color: var(--accent); }
   .menu-item-card .name { font-weight: 600; font-size: 14px; }
   .menu-item-card .price { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .menu-item-img { width: 100%; aspect-ratio: 1.4; object-fit: cover; border-radius: 8px; margin-bottom: 8px; display: block; }
+  .menu-item-img-placeholder { display: flex; align-items: center; justify-content: center; background: var(--panel-border); font-size: 28px; }
 
-  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-  th, td { text-align: left; padding: 7px 4px; border-bottom: 1px solid var(--panel-border); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; table-layout: fixed; }
+  th, td { text-align: left; padding: 7px 4px; border-bottom: 1px solid var(--panel-border); overflow-wrap: break-word; }
+  #order-panel table th:nth-child(1), #order-panel table td:nth-child(1) { width: 42%; }
+  #order-panel table th:nth-child(2), #order-panel table td:nth-child(2) { width: 30%; }
+  #order-panel table th:nth-child(3), #order-panel table td:nth-child(3) { width: 20%; }
+  #order-panel table th:nth-child(4), #order-panel table td:nth-child(4) { width: 8%; }
+  .item-name-cell { }
+  .item-name-text { word-break: break-word; line-height: 1.3; margin-bottom: 4px; }
+  .parcel-toggle-btn {
+    font-size: 10.5px; padding: 2px 7px; border-radius: 10px; border: 1px solid var(--panel-border);
+    background: var(--panel); color: var(--muted); cursor: pointer; white-space: nowrap;
+  }
+  .parcel-toggle-btn.is-parcel { background: rgba(255,138,61,0.15); border-color: var(--accent); color: var(--accent); }
+  @media (max-width: 480px) {
+    body { padding: 12px; }
+    table { font-size: 12px; }
+    .qty-controls { gap: 3px; }
+    .qty-btn { width: 20px; height: 20px; font-size: 12px; }
+    .menu-grid { grid-template-columns: repeat(auto-fill, minmax(115px, 1fr)); gap: 8px; }
+  }
   th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; }
 
   .order-card { background: var(--bg); border: 1px solid var(--panel-border); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
@@ -97,13 +117,14 @@
   .receipt .line { display: flex; justify-content: space-between; }
   .receipt hr { border: none; border-top: 1px dashed var(--panel-border); margin: 8px 0; }
 
-  .add-item-form { display: grid; grid-template-columns: 1.5fr 1fr 1fr auto; gap: 6px; margin-top: 14px; align-items: end; }
+  .add-item-form { display: grid; grid-template-columns: 0.9fr 1.3fr 1fr 0.8fr auto; gap: 6px; margin-top: 14px; align-items: end; }
   .add-item-form label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 4px; }
   .add-item-form input, .add-item-form select {
     width: 100%; background: var(--bg); border: 1px solid var(--panel-border); border-radius: 6px;
     padding: 7px 8px; color: var(--text); font-size: 13px;
   }
   .toggle-inactive { opacity: 0.5; }
+  .manage-item-thumb { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; display: block; margin-bottom: 4px; }
 
   .qty-controls { display: flex; align-items: center; gap: 6px; }
   .qty-btn {
@@ -173,18 +194,6 @@
   </div>
 </div>
 
-<div id="dining-mode-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:50; align-items:center; justify-content:center;">
-  <div class="panel" style="max-width:340px; width:90%; text-align:center;">
-    <h2>Dine-in or Takeaway?</h2>
-    <div style="color:var(--muted); font-size:13px; margin-bottom:16px;">Takeaway adds &#8377;5 per item for packing.</div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
-      <button class="secondary" style="margin-top:0; background:var(--accent); color:#0f1720; border:none; font-weight:700; padding:16px;" onclick="chooseDiningMode('dine-in')">Dine-in</button>
-      <button class="secondary" style="margin-top:0; background:var(--accent); color:#0f1720; border:none; font-weight:700; padding:16px;" onclick="chooseDiningMode('takeaway')">Takeaway (+&#8377;5/item)</button>
-    </div>
-    <button class="secondary" onclick="cancelDiningModePrompt()">Cancel</button>
-  </div>
-</div>
-
 <div id="gpay-qr-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:50; align-items:center; justify-content:center;">
   <div class="panel" style="max-width:340px; width:90%; text-align:center;">
     <h2>Scan to Pay</h2>
@@ -211,17 +220,22 @@
 
     <div id="manage-mode-view" style="display:none;">
       <table>
-        <thead><tr><th>Name</th><th>Price</th><th>Category</th><th>Active</th><th></th></tr></thead>
+        <thead><tr><th>Image</th><th>Name</th><th>Price</th><th>Category</th><th>Active</th><th></th></tr></thead>
         <tbody id="manage-items-body"></tbody>
       </table>
       <div class="add-item-form">
+        <div><label>Photo</label><input type="file" id="new-item-image" accept="image/*" style="font-size:12px;"></div>
         <div><label>Name</label><input type="text" id="new-item-name" placeholder="e.g. Sundal"></div>
         <div><label>Category</label>
           <select id="new-item-category">
-            <option value="starter">Starter</option>
-            <option value="main">Main</option>
-            <option value="beverage">Beverage</option>
-            <option value="dessert">Dessert</option>
+            <option value="burger">Burgers</option>
+            <option value="momo">Momos</option>
+            <option value="home_made">Home Made</option>
+            <option value="roll">Rolls</option>
+            <option value="veg">Veg</option>
+            <option value="non_veg">Non Veg</option>
+            <option value="pasta">Pasta</option>
+            <option value="seafood">Seafood</option>
             <option value="other" selected>Other</option>
           </select>
         </div>
@@ -276,8 +290,6 @@ let SHOP_UPI_ID = JSON.parse(document.getElementById('shop-upi-id-data').textCon
 let menuItemsById = {};
 let openOrders = {};      // orderId -> order object (with items)
 let activeOrderId = null; // which order new menu taps add items to
-let orderDiningMode = {}; // orderId -> 'dine-in' | 'takeaway', decided once at checkout
-let pendingCheckoutAction = null; // { orderId, method } while the dine-in/takeaway modal is open
 
 function getCookie(name) {
   const match = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
@@ -326,7 +338,9 @@ async function loadMenuGrid() {
     const baseBtn = document.createElement('button');
     baseBtn.type = 'button';
     baseBtn.style.cssText = 'background:none; border:none; padding:0; text-align:left; width:100%; cursor:pointer; color:inherit;';
-    baseBtn.innerHTML = `<div class="name">${item.name}</div><div class="price">${fmt(item.price)}</div>`;
+    baseBtn.innerHTML = `
+      ${item.image ? `<img src="${item.image}" alt="${item.name}" class="menu-item-img">` : `<div class="menu-item-img menu-item-img-placeholder">🍽️</div>`}
+      <div class="name">${item.name}</div><div class="price">${fmt(item.price)}</div>`;
     baseBtn.onclick = () => addItemToActiveOrder(item.id, {});
     card.appendChild(baseBtn);
 
@@ -359,6 +373,10 @@ async function loadManageMenu() {
     const tr = document.createElement('tr');
     if (!item.is_active) tr.classList.add('toggle-inactive');
     tr.innerHTML = `
+      <td>
+        <img src="${item.image || ''}" class="manage-item-thumb" style="${item.image ? '' : 'display:none;'}">
+        <input type="file" accept="image/*" data-field="image-file" style="font-size:11px; width:90px; color:var(--text);">
+      </td>
       <td><input type="text" value="${item.name}" data-field="name" style="width:100%; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; color:var(--text); padding:5px 6px;"></td>
       <td><input type="number" value="${item.price}" data-field="price" step="0.01" style="width:80px; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; color:var(--text); padding:5px 6px;"></td>
       <td>${item.category}</td>
@@ -378,8 +396,27 @@ async function saveMenuItem(id, row) {
   const name = row.querySelector('[data-field="name"]').value;
   const price = row.querySelector('[data-field="price"]').value;
   const is_active = row.querySelector('[data-field="is_active"]').checked;
+  const imageInput = row.querySelector('[data-field="image-file"]');
+
+  const formData = new FormData();
+  formData.append('name', name);
+  formData.append('price', price);
+  formData.append('is_active', is_active);
+  if (imageInput.files && imageInput.files[0]) {
+    formData.append('image', imageInput.files[0]);
+  }
+
   try {
-    await api(`/api/menu-items/${id}/`, { method: 'PATCH', body: JSON.stringify({ name, price, is_active }) });
+    const res = await fetch(`/api/menu-items/${id}/`, {
+      method: 'PATCH',
+      credentials: 'same-origin',
+      headers: { 'X-CSRFToken': getCookie('csrftoken') },
+      body: formData,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || JSON.stringify(body) || `Request failed (${res.status})`);
+    }
     showStatus('Menu item updated.', 'success');
     loadManageMenu();
     loadMenuGrid();
@@ -392,11 +429,31 @@ async function addMenuItem() {
   const name = document.getElementById('new-item-name').value.trim();
   const category = document.getElementById('new-item-category').value;
   const price = document.getElementById('new-item-price').value;
+  const imageInput = document.getElementById('new-item-image');
   if (!name || !price) { showStatus('Name and price are required.', 'error'); return; }
+
+  const formData = new FormData();
+  formData.append('name', name);
+  formData.append('category', category);
+  formData.append('price', price);
+  if (imageInput.files && imageInput.files[0]) {
+    formData.append('image', imageInput.files[0]);
+  }
+
   try {
-    await api('/api/menu-items/', { method: 'POST', body: JSON.stringify({ name, category, price }) });
+    const res = await fetch('/api/menu-items/', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-CSRFToken': getCookie('csrftoken') },
+      body: formData,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || JSON.stringify(body) || `Request failed (${res.status})`);
+    }
     document.getElementById('new-item-name').value = '';
     document.getElementById('new-item-price').value = '';
+    imageInput.value = '';
     showStatus(`Added "${name}" to the menu.`, 'success');
     loadManageMenu();
     loadMenuGrid();
@@ -478,9 +535,9 @@ function renderOrdersList() {
       ? `${order.customer_name} <span class="tag">Order ${order.daily_number}</span>`
       : (order.table_or_token || `Order ${order.daily_number}`);
     const hasItems = order.items && order.items.length > 0;
-
-    const diningLabel = orderDiningMode[order.id]
-      ? `<span style="color:var(--muted); font-size:12px; margin-left:8px;">(${orderDiningMode[order.id] === 'takeaway' ? 'Takeaway' : 'Dine-in'})</span>`
+    const parcelCount = (order.items || []).filter(i => i.is_parcel).reduce((sum, i) => sum + i.quantity, 0);
+    const diningLabel = parcelCount > 0
+      ? `<span style="color:var(--muted); font-size:12px; margin-left:8px;">(${parcelCount} to go)</span>`
       : '';
 
     card.innerHTML = `
@@ -530,8 +587,15 @@ function renderOrdersList() {
         adjustItemQuantity(order.id, menuItemId, newQty, mods);
       });
     });
-    card.querySelector('[data-action="pay-cash"]').addEventListener('click', () => initiateCheckout(order.id, 'cash'));
-    card.querySelector('[data-action="pay-upi"]').addEventListener('click', () => initiateCheckout(order.id, 'upi'));
+    card.querySelectorAll('[data-action="toggle-parcel"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const menuItemId = Number(btn.dataset.menuItem);
+        const mods = JSON.parse(btn.dataset.mods);
+        toggleItemParcel(order.id, menuItemId, mods);
+      });
+    });
+    card.querySelector('[data-action="pay-cash"]').addEventListener('click', () => payAndBill(order.id, 'cash'));
+    card.querySelector('[data-action="pay-upi"]').addEventListener('click', () => openGpayQr(order.id, order.subtotal));
     card.querySelector('[data-action="cancel"]').addEventListener('click', () => cancelOrder(order.id));
 
     container.appendChild(card);
@@ -545,9 +609,14 @@ function renderItemRows(order) {
   return order.items.map(item => {
     const mods = JSON.stringify({ is_parcel: item.is_parcel, is_fried: item.is_fried, has_extra_cheese: item.has_extra_cheese })
       .replace(/"/g, '&quot;');
+    const parcelBtnLabel = item.is_parcel ? '📦 Parcel' : '🍽️ Dine-in';
+    const parcelBtnClass = item.is_parcel ? 'parcel-toggle-btn is-parcel' : 'parcel-toggle-btn';
     return `
       <tr>
-        <td>${item.display_name || item.menu_item_name}</td>
+        <td class="item-name-cell">
+          <div class="item-name-text">${item.display_name || item.menu_item_name}</div>
+          <button class="${parcelBtnClass}" data-action="toggle-parcel" data-menu-item="${item.menu_item}" data-mods="${mods}">${parcelBtnLabel}</button>
+        </td>
         <td>
           <div class="qty-controls">
             <button class="qty-btn" data-action="dec" data-menu-item="${item.menu_item}" data-mods="${mods}">−</button>
@@ -559,6 +628,24 @@ function renderItemRows(order) {
         <td><button class="remove-item-btn" data-action="remove" data-menu-item="${item.menu_item}" data-mods="${mods}">✕</button></td>
       </tr>`;
   }).join('');
+}
+
+async function toggleItemParcel(orderId, menuItemId, mods) {
+  try {
+    const order = await api(`/api/orders/${orderId}/toggle_item_parcel/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        menu_item: menuItemId,
+        is_fried: !!mods.is_fried,
+        has_extra_cheese: !!mods.has_extra_cheese,
+        current_is_parcel: !!mods.is_parcel,
+      }),
+    });
+    openOrders[orderId] = order;
+    renderOrdersList();
+  } catch (e) {
+    showStatus(e.message, 'error');
+  }
 }
 
 async function adjustItemQuantity(orderId, menuItemId, newQuantity, mods = {}) {
@@ -580,55 +667,12 @@ async function adjustItemQuantity(orderId, menuItemId, newQuantity, mods = {}) {
   }
 }
 
-function initiateCheckout(orderId, method) {
-  if (orderDiningMode[orderId]) {
-    proceedToPayment(orderId, method);
-    return;
-  }
-  pendingCheckoutAction = { orderId, method };
-  document.getElementById('dining-mode-modal').style.display = 'flex';
-}
-
-async function chooseDiningMode(mode) {
-  document.getElementById('dining-mode-modal').style.display = 'none';
-  if (!pendingCheckoutAction) return;
-  const { orderId, method } = pendingCheckoutAction;
-  pendingCheckoutAction = null;
-  try {
-    const order = await api(`/api/orders/${orderId}/set_dining_mode/`, {
-      method: 'POST', body: JSON.stringify({ is_parcel: mode === 'takeaway' }),
-    });
-    openOrders[orderId] = order;
-    orderDiningMode[orderId] = mode;
-    renderOrdersList();
-    proceedToPayment(orderId, method);
-  } catch (e) {
-    showStatus(e.message, 'error');
-  }
-}
-
-function proceedToPayment(orderId, method) {
-  const order = openOrders[orderId];
-  if (!order) return;
-  if (method === 'cash') {
-    payAndBill(orderId, 'cash');
-  } else {
-    openGpayQr(orderId, order.subtotal);
-  }
-}
-
-function cancelDiningModePrompt() {
-  document.getElementById('dining-mode-modal').style.display = 'none';
-  pendingCheckoutAction = null;
-}
-
 async function payAndBill(orderId, paymentMethod) {
   try {
     const bill = await api(`/api/orders/${orderId}/generate_bill/`, {
       method: 'POST', body: JSON.stringify({ payment_method: paymentMethod }),
     });
     delete openOrders[orderId];
-    delete orderDiningMode[orderId];
     if (activeOrderId === orderId) {
       activeOrderId = Object.keys(openOrders)[0] ? Number(Object.keys(openOrders)[0]) : null;
     }
@@ -700,7 +744,6 @@ async function cancelOrder(orderId) {
   try {
     await api(`/api/orders/${orderId}/`, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) });
     delete openOrders[orderId];
-    delete orderDiningMode[orderId];
     if (activeOrderId === orderId) {
       activeOrderId = Object.keys(openOrders)[0] ? Number(Object.keys(openOrders)[0]) : null;
     }

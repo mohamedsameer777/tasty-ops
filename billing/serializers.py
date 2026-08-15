@@ -19,7 +19,7 @@ from .models import (
 class MenuItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = MenuItem
-        fields = ['id', 'name', 'category', 'price', 'cost_price', 'supports_fried_option', 'supports_cheese_option', 'is_active']
+        fields = ['id', 'name', 'category', 'price', 'cost_price', 'image', 'supports_fried_option', 'supports_cheese_option', 'is_active']
 
 
 class OrderItemSerializer(serializers.ModelSerializer):

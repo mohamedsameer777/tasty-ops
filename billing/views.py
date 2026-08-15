@@ -212,15 +212,16 @@ class OrderViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'])
-    def set_dining_mode(self, request, pk=None):
+    def toggle_item_parcel(self, request, pk=None):
         """
-        POST /api/orders/{id}/set_dining_mode/
-        Body: {"is_parcel": true}  — true for takeaway (+Rs.5/item), false
-        for dine-in. Applies to EVERY item currently in the order (this is
-        meant to be called once at checkout, not per item), recomputing
-        each item's price. Rows that would become duplicates after the
-        change (same menu item + fried/cheese, differing only by the old
-        is_parcel value) are merged into one.
+        POST /api/orders/{id}/toggle_item_parcel/
+        Body: {"menu_item": id, "is_fried": bool, "has_extra_cheese": bool, "current_is_parcel": bool}
+        — describes the exact row as it exists right now. Flips that row's
+        is_parcel (dine-in <-> takeaway, +/- Rs.5/unit), moving its whole
+        quantity to the opposite version and merging into a matching row if
+        one already exists. This is per-item on purpose: one order can be
+        part dine-in, part parcel (e.g. one person eating in, one taking
+        food to go).
         """
         order = self.get_object()
         if order.status != Order.Status.OPEN:
@@ -229,21 +230,32 @@ class OrderViewSet(TenantScopedMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        is_parcel = bool(request.data.get('is_parcel', False))
+        menu_item_id = request.data.get('menu_item')
+        is_fried = bool(request.data.get('is_fried', False))
+        has_extra_cheese = bool(request.data.get('has_extra_cheese', False))
+        current_is_parcel = bool(request.data.get('current_is_parcel', False))
+        new_is_parcel = not current_is_parcel
 
         with transaction.atomic():
-            merged = {}
-            for item in order.items.all():
-                key = (item.menu_item_id, item.is_fried, item.has_extra_cheese)
-                merged[key] = merged.get(key, 0) + item.quantity
-
-            order.items.all().delete()
-            for (menu_item_id, is_fried, has_extra_cheese), quantity in merged.items():
-                OrderItem.objects.create(
+            try:
+                source = OrderItem.objects.get(
                     order=order, menu_item_id=menu_item_id,
-                    is_parcel=is_parcel, is_fried=is_fried, has_extra_cheese=has_extra_cheese,
-                    quantity=quantity,
+                    is_fried=is_fried, has_extra_cheese=has_extra_cheese, is_parcel=current_is_parcel,
                 )
+            except OrderItem.DoesNotExist:
+                return Response({'detail': 'That item is not in this order.'}, status=status.HTTP_404_NOT_FOUND)
+
+            quantity = source.quantity
+            source.delete()
+
+            target, created = OrderItem.objects.get_or_create(
+                order=order, menu_item_id=menu_item_id,
+                is_fried=is_fried, has_extra_cheese=has_extra_cheese, is_parcel=new_is_parcel,
+                defaults={'quantity': quantity},
+            )
+            if not created:
+                target.quantity += quantity
+                target.save()
 
         order = self.get_queryset().get(pk=order.pk)
         return Response(OrderSerializer(order).data, status=status.HTTP_200_OK)

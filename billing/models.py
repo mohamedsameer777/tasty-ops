@@ -75,6 +75,10 @@ class MenuItem(models.Model):
         validators=[MinValueValidator(Decimal('0.00'))],
         help_text="Optional. What it costs you to make one unit — only used later for margin/wastage analysis, never required for billing. Leave 0 if you don't track this.",
     )
+    image = models.ImageField(
+        upload_to='menu_item_images/', blank=True, null=True,
+        help_text="Photo shown on the ordering screen so staff can find the item quickly.",
+    )
     supports_fried_option = models.BooleanField(
         default=False, help_text="Show a 'Fried? +₹20' choice when adding this item (e.g. for momos).",
     )
