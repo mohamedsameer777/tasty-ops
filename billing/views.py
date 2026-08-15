@@ -1,3 +1,5 @@
+import logging
+
 from decimal import Decimal
 
 from django.db import transaction
@@ -54,6 +56,20 @@ class MenuItemViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         if active_only == 'true':
             qs = qs.filter(is_active=True)
         return qs
+
+    def perform_create(self, serializer):
+        try:
+            super().perform_create(serializer)
+        except Exception as exc:
+            logging.getLogger(__name__).exception("Failed to create menu item")
+            raise ValidationError({'detail': f'Could not save this item: {exc}'})
+
+    def perform_update(self, serializer):
+        try:
+            super().perform_update(serializer)
+        except Exception as exc:
+            logging.getLogger(__name__).exception("Failed to update menu item id=%s", serializer.instance.id)
+            raise ValidationError({'detail': f'Could not save this item: {exc}'})
 
 
 class OrderViewSet(TenantScopedMixin, viewsets.ModelViewSet):
