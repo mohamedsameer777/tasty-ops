@@ -15,9 +15,9 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
+from django.views.static import serve
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from billing.dashboard_views import (
@@ -35,7 +35,10 @@ urlpatterns = [
     path('billing/', OrderEntryView.as_view(), name='order-entry'),
     path('shop-settings/', ShopSettingsView.as_view(), name='shop-settings'),
     path('sw.js', ServiceWorkerView.as_view(), name='service-worker'),
+    # Serves uploaded photos (menu items, shop logo) at all times, not just
+    # in DEBUG. Django's own static() helper refuses to do this when
+    # DEBUG=False, which is why uploaded images 404'd in production —
+    # this app is small enough that serving media straight from Django is
+    # fine; a bigger deployment would use cloud storage (e.g. S3) instead.
+    re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
 ]
-
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

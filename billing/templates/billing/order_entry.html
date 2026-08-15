@@ -496,6 +496,7 @@ async function addItemToActiveOrder(menuItemId, modifiers = {}) {
     });
     openOrders[activeOrderId] = order;
     renderOrdersList();
+    showStatus('Added to order.', 'success');
   } catch (e) {
     showStatus(e.message, 'error');
   }
@@ -514,6 +515,7 @@ async function saveCustomerInfo(orderId) {
       method: 'PATCH', body: JSON.stringify({ customer_name, customer_phone }),
     });
     openOrders[orderId] = order;
+    showStatus('Customer details saved.', 'success');
   } catch (e) {
     showStatus(e.message, 'error');
   }
@@ -642,6 +644,7 @@ async function toggleItemParcel(orderId, menuItemId, mods) {
     });
     openOrders[orderId] = order;
     renderOrdersList();
+    showStatus('Updated.', 'success');
   } catch (e) {
     showStatus(e.message, 'error');
   }
@@ -747,6 +750,7 @@ async function cancelOrder(orderId) {
       activeOrderId = Object.keys(openOrders)[0] ? Number(Object.keys(openOrders)[0]) : null;
     }
     renderOrdersList();
+    showStatus('Order cancelled.', 'success');
   } catch (e) {
     showStatus(e.message, 'error');
   }
