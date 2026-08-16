@@ -173,6 +173,12 @@ STORAGES = {
 STATICFILES_STORAGE = STORAGES['staticfiles']['BACKEND']
 DEFAULT_FILE_STORAGE = STORAGES['default']['BACKEND']
 
+# Django REST Framework's browsable-API CSS references a .map sourcemap
+# file that DRF doesn't actually ship — without this, WhiteNoise's strict
+# manifest post-processing treats that as a fatal build error. This tells
+# it to leave the broken reference alone instead of crashing.
+WHITENOISE_MANIFEST_STRICT = False
+
 CLOUDINARY_STORAGE = {
     'CLOUD_NAME': config('CLOUDINARY_CLOUD_NAME', default=''),
     'API_KEY': config('CLOUDINARY_API_KEY', default=''),
