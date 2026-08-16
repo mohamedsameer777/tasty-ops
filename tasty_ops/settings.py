@@ -166,6 +166,13 @@ STORAGES = {
     },
 }
 
+# django-cloudinary-storage's own collectstatic override still reads these
+# old-style (pre-Django-4.2) settings directly instead of STORAGES above —
+# without these, `collectstatic` crashes with
+# "'Settings' object has no attribute 'STATICFILES_STORAGE'".
+STATICFILES_STORAGE = STORAGES['staticfiles']['BACKEND']
+DEFAULT_FILE_STORAGE = STORAGES['default']['BACKEND']
+
 CLOUDINARY_STORAGE = {
     'CLOUD_NAME': config('CLOUDINARY_CLOUD_NAME', default=''),
     'API_KEY': config('CLOUDINARY_API_KEY', default=''),
