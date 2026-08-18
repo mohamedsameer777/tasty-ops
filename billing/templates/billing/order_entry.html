@@ -226,7 +226,7 @@
         <div><label>Photo</label><input type="file" id="new-item-image" accept="image/*" style="font-size:12px;"></div>
         <div><label>Name</label><input type="text" id="new-item-name" placeholder="e.g. Sundal"></div>
         <div><label>Category</label>
-          <select id="new-item-category">
+          <select id="new-item-category" onchange="updateNewItemOptionVisibility()">
             <option value="burger">Burgers</option>
             <option value="momo">Momos</option>
             <option value="home_made">Home Made</option>
@@ -241,8 +241,8 @@
         <div><label>Price &#8377;</label><input type="number" id="new-item-price" step="0.01" min="0"></div>
         <div>
           <label>Options</label>
-          <label style="display:flex; align-items:center; gap:4px; font-size:11px; margin-bottom:2px;"><input type="checkbox" id="new-item-fried"> Fried +&#8377;20</label>
-          <label style="display:flex; align-items:center; gap:4px; font-size:11px;"><input type="checkbox" id="new-item-cheese"> Cheese +&#8377;20</label>
+          <label id="new-item-fried-label" style="display:none; align-items:center; gap:4px; font-size:11px; margin-bottom:2px;"><input type="checkbox" id="new-item-fried"> Fried +&#8377;20</label>
+          <label id="new-item-cheese-label" style="display:none; align-items:center; gap:4px; font-size:11px;"><input type="checkbox" id="new-item-cheese"> Cheese +&#8377;20</label>
         </div>
         <button class="small" onclick="addMenuItem()">Add</button>
       </div>
@@ -385,12 +385,15 @@ async function loadManageMenu() {
       <td><input type="number" value="${item.price}" data-field="price" step="0.01" style="width:80px; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; color:var(--text); padding:5px 6px;"></td>
       <td>${item.category}</td>
       <td style="white-space:nowrap;">
-        <label style="display:flex; align-items:center; gap:4px; font-size:11px; margin-bottom:3px;">
+        ${item.category === 'momo' ? `
+        <label style="display:flex; align-items:center; gap:4px; font-size:11px;">
           <input type="checkbox" data-field="supports_fried_option" ${item.supports_fried_option ? 'checked' : ''}> Fried +&#8377;20
-        </label>
+        </label>` : ''}
+        ${item.category === 'burger' ? `
         <label style="display:flex; align-items:center; gap:4px; font-size:11px;">
           <input type="checkbox" data-field="supports_cheese_option" ${item.supports_cheese_option ? 'checked' : ''}> Cheese +&#8377;20
-        </label>
+        </label>` : ''}
+        ${item.category !== 'momo' && item.category !== 'burger' ? '<span style="color:var(--muted); font-size:11px;">—</span>' : ''}
       </td>
       <td><input type="checkbox" data-field="is_active" ${item.is_active ? 'checked' : ''}></td>
       <td></td>
@@ -408,8 +411,8 @@ async function saveMenuItem(id, row) {
   const name = row.querySelector('[data-field="name"]').value;
   const price = row.querySelector('[data-field="price"]').value;
   const is_active = row.querySelector('[data-field="is_active"]').checked;
-  const supports_fried_option = row.querySelector('[data-field="supports_fried_option"]').checked;
-  const supports_cheese_option = row.querySelector('[data-field="supports_cheese_option"]').checked;
+  const supports_fried_option = row.querySelector('[data-field="supports_fried_option"]')?.checked || false;
+  const supports_cheese_option = row.querySelector('[data-field="supports_cheese_option"]')?.checked || false;
   const imageInput = row.querySelector('[data-field="image-file"]');
 
   const formData = new FormData();
@@ -439,6 +442,18 @@ async function saveMenuItem(id, row) {
   } catch (e) {
     showStatus(e.message, 'error');
   }
+}
+
+function updateNewItemOptionVisibility() {
+  const category = document.getElementById('new-item-category').value;
+  const friedLabel = document.getElementById('new-item-fried-label');
+  const cheeseLabel = document.getElementById('new-item-cheese-label');
+
+  friedLabel.style.display = category === 'momo' ? 'flex' : 'none';
+  cheeseLabel.style.display = category === 'burger' ? 'flex' : 'none';
+
+  if (category !== 'momo') document.getElementById('new-item-fried').checked = false;
+  if (category !== 'burger') document.getElementById('new-item-cheese').checked = false;
 }
 
 async function addMenuItem() {
