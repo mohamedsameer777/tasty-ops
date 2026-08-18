@@ -1,4 +1,5 @@
 import json
+import logging
 
 from django.contrib.auth import login
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -7,7 +8,9 @@ from django.shortcuts import redirect
 from django.templatetags.static import static
 from django.urls import reverse_lazy
 from django.views import View
+from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import CreateView, TemplateView
+from django.utils.decorators import method_decorator
 
 from .forms import ShopSignupForm
 
@@ -114,6 +117,81 @@ class ShopSettingsView(LoginRequiredMixin, View):
             'longitude': str(shop.longitude) if shop.longitude is not None else None,
             'address': shop.address,
             'upi_id': shop.upi_id,
+        })
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class RunDailyJobsView(View):
+    """
+    GET /run-daily-jobs/?token=...
+    Meant to be triggered once a day by a free external scheduler (e.g.
+    cron-job.org) instead of a persistent Celery worker, since Render's
+    free tier only offers web services, not background workers. Runs
+    demand forecasting + the reorder agent + anomaly backfill for every
+    shop, and the weekly summary report on Mondays.
+
+    Protected by a shared-secret token (the DAILY_JOBS_SECRET env var)
+    instead of a login, since the caller here is a machine, not a browser.
+    """
+    def get(self, request):
+        logger = logging.getLogger(__name__)
+
+        from django.conf import settings
+        expected = getattr(settings, 'DAILY_JOBS_SECRET', '')
+        token = request.GET.get('token', '')
+        if not expected or token != expected:
+            return JsonResponse({'detail': 'Forbidden'}, status=403)
+
+        from datetime import date, timedelta
+
+        from .agents import run_reorder_agent
+        from .anomaly_agent import generate_weekly_summary, run_anomaly_agent
+        from .forecasting import run_forecast_for_all_items
+        from .models import Shop
+
+        today = date.today()
+        forecast_date = today + timedelta(days=1)
+        is_monday = today.weekday() == 0
+
+        results = []
+        for shop in Shop.objects.filter(is_active=True):
+            shop_result = {'shop': shop.slug}
+
+            try:
+                forecasts = run_forecast_for_all_items(shop, forecast_date)
+                shop_result['forecasts'] = len(forecasts) if forecasts else 0
+            except Exception as exc:
+                logger.exception("Forecast failed for shop %s", shop.slug)
+                shop_result['forecast_error'] = str(exc)
+
+            try:
+                logs = run_reorder_agent(shop, forecast_date)
+                shop_result['reorder_decisions'] = len(logs) if logs else 0
+            except Exception as exc:
+                logger.exception("Reorder agent failed for shop %s", shop.slug)
+                shop_result['reorder_error'] = str(exc)
+
+            try:
+                shop_result['anomaly_check'] = run_anomaly_agent(shop)
+            except Exception as exc:
+                logger.exception("Anomaly agent failed for shop %s", shop.slug)
+                shop_result['anomaly_error'] = str(exc)
+
+            if is_monday:
+                try:
+                    report = generate_weekly_summary(shop)
+                    shop_result['weekly_summary'] = f"{report.week_start} to {report.week_end}"
+                except Exception as exc:
+                    logger.exception("Weekly summary failed for shop %s", shop.slug)
+                    shop_result['weekly_summary_error'] = str(exc)
+
+            results.append(shop_result)
+
+        return JsonResponse({
+            'date': today.isoformat(),
+            'forecast_date': forecast_date.isoformat(),
+            'ran_weekly_summary': is_monday,
+            'shops': results,
         })
 
 

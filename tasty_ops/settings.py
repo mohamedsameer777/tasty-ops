@@ -24,6 +24,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-78ar06r+zinrt7u^$rq8&=oadynoy7$3!zua2n%&r56^%w+(6k')
 
+# Shared secret for /run-daily-jobs/ — a free external scheduler (cron-job.org)
+# hits that URL with ?token=<this value> once a day to run forecasting and
+# the reorder/anomaly agents, since Render's free tier has no background
+# worker to run these on a schedule itself.
+DAILY_JOBS_SECRET = config('DAILY_JOBS_SECRET', default='')
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 

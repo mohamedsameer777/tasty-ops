@@ -21,7 +21,7 @@ from django.views.static import serve
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from billing.dashboard_views import (
-    DashboardView, OrderEntryView, ServiceWorkerView, ShopSettingsView, SignupView,
+    DashboardView, OrderEntryView, RunDailyJobsView, ServiceWorkerView, ShopSettingsView, SignupView,
 )
 
 urlpatterns = [
@@ -35,6 +35,7 @@ urlpatterns = [
     path('billing/', OrderEntryView.as_view(), name='order-entry'),
     path('shop-settings/', ShopSettingsView.as_view(), name='shop-settings'),
     path('sw.js', ServiceWorkerView.as_view(), name='service-worker'),
+    path('run-daily-jobs/', RunDailyJobsView.as_view(), name='run-daily-jobs'),
     # Serves uploaded photos (menu items, shop logo) at all times, not just
     # in DEBUG. Django's own static() helper refuses to do this when
     # DEBUG=False, which is why uploaded images 404'd in production —
