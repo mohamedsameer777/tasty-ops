@@ -162,6 +162,8 @@
 
 {{ shop.name|default:"Tasty Zone"|json_script:"shop-name-data" }}
 {{ shop.upi_id|default:""|json_script:"shop-upi-id-data" }}
+{{ shop.google_review_url|default:""|json_script:"shop-google-review-data" }}
+{{ shop.instagram_url|default:""|json_script:"shop-instagram-data" }}
 
 <div id="shop-settings-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:50; align-items:center; justify-content:center;">
   <div class="panel" style="max-width:420px; width:90%;">
@@ -177,6 +179,16 @@
     <div style="margin-bottom:14px;">
       <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">Your UPI ID (for GPay QR codes)</label>
       <input type="text" id="shop-upi-id-input" value="{{ shop.upi_id|default:'' }}" placeholder="e.g. yourname@okhdfcbank"
+        style="width:100%; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; padding:7px 8px; color:var(--text); font-size:13px;">
+    </div>
+    <div style="margin-bottom:14px;">
+      <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">Google review link (added to WhatsApp bills)</label>
+      <input type="text" id="shop-google-review-input" value="{{ shop.google_review_url|default:'' }}" placeholder="Your Google Maps review link"
+        style="width:100%; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; padding:7px 8px; color:var(--text); font-size:13px;">
+    </div>
+    <div style="margin-bottom:14px;">
+      <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">Instagram link (added to WhatsApp bills)</label>
+      <input type="text" id="shop-instagram-input" value="{{ shop.instagram_url|default:'' }}" placeholder="Your Instagram profile link"
         style="width:100%; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; padding:7px 8px; color:var(--text); font-size:13px;">
     </div>
     <div style="margin-bottom:14px;">
@@ -290,6 +302,8 @@ initTheme();
 
 const SHOP_NAME = JSON.parse(document.getElementById('shop-name-data').textContent);
 let SHOP_UPI_ID = JSON.parse(document.getElementById('shop-upi-id-data').textContent);
+let SHOP_GOOGLE_REVIEW_URL = JSON.parse(document.getElementById('shop-google-review-data').textContent);
+let SHOP_INSTAGRAM_URL = JSON.parse(document.getElementById('shop-instagram-data').textContent);
 
 let menuItemsById = {};
 let openOrders = {};      // orderId -> order object (with items)
@@ -835,6 +849,18 @@ function sendBillOnWhatsapp() {
     i => `${i.display_name || i.menu_item_name} x${i.quantity} - ${fmt(i.line_total)}`
   ).join('\n');
   const paymentLabel = lastBill.payment_method === 'upi' ? 'GPay / UPI' : lastBill.payment_method === 'cash' ? 'Cash' : 'Other';
+
+  const customerName = (lastBill.order.customer_name || '').trim();
+  const thankYouLine = customerName ? `Thank you, ${customerName}!` : `Thank you for your order!`;
+
+  let extras = '';
+  if (SHOP_GOOGLE_REVIEW_URL) {
+    extras += `\n\nEnjoyed your food? A quick review means a lot to us:\n${SHOP_GOOGLE_REVIEW_URL}`;
+  }
+  if (SHOP_INSTAGRAM_URL) {
+    extras += `\n\nFollow us on Instagram:\n${SHOP_INSTAGRAM_URL}`;
+  }
+
   const text =
     `*${SHOP_NAME}*\n` +
     `Bill #${lastBill.id} - ${new Date(lastBill.created_at).toLocaleString('en-IN')}\n\n` +
@@ -843,7 +869,8 @@ function sendBillOnWhatsapp() {
     (Number(lastBill.tax_amount) > 0 ? `Tax: ${fmt(lastBill.tax_amount)}\n` : '') +
     `*Total: ${fmt(lastBill.total)}*\n` +
     `Paid via: ${paymentLabel}\n\n` +
-    `Thank you for your order!`;
+    `${thankYouLine}` +
+    extras;
   const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
   window.open(url, '_blank');
 }
@@ -895,6 +922,8 @@ async function saveShopSettings() {
     formData.append('logo', logoInput.files[0]);
   }
   formData.append('upi_id', document.getElementById('shop-upi-id-input').value.trim());
+  formData.append('google_review_url', document.getElementById('shop-google-review-input').value.trim());
+  formData.append('instagram_url', document.getElementById('shop-instagram-input').value.trim());
   if (pendingShopLocation) {
     formData.append('latitude', pendingShopLocation.latitude);
     formData.append('longitude', pendingShopLocation.longitude);
@@ -914,6 +943,8 @@ async function saveShopSettings() {
       document.getElementById('shop-settings-logo-preview').src = data.logo_url;
     }
     SHOP_UPI_ID = data.upi_id || '';
+    SHOP_GOOGLE_REVIEW_URL = data.google_review_url || '';
+    SHOP_INSTAGRAM_URL = data.instagram_url || '';
     closeShopSettings();
     showStatus('Shop settings saved.', 'success');
   } catch (e) {

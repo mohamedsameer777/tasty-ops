@@ -105,6 +105,14 @@ class ShopSettingsView(LoginRequiredMixin, View):
             if upi_id is not None:
                 shop.upi_id = upi_id.strip()
 
+            google_review_url = request.POST.get('google_review_url')
+            if google_review_url is not None:
+                shop.google_review_url = google_review_url.strip()
+
+            instagram_url = request.POST.get('instagram_url')
+            if instagram_url is not None:
+                shop.instagram_url = instagram_url.strip()
+
             shop.save()
         except Exception:
             logger.exception("shop-settings save failed for shop id=%s", shop.id)
@@ -117,7 +125,42 @@ class ShopSettingsView(LoginRequiredMixin, View):
             'longitude': str(shop.longitude) if shop.longitude is not None else None,
             'address': shop.address,
             'upi_id': shop.upi_id,
+            'google_review_url': shop.google_review_url,
+            'instagram_url': shop.instagram_url,
         })
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class BootstrapAdminView(View):
+    """
+    GET /bootstrap-admin/?token=...&username=...&password=...
+    Creates a Django superuser without needing Render's paid Shell tab —
+    reuses DAILY_JOBS_SECRET as the token since it's already configured.
+    Refuses if that username already exists, so it can't be used to
+    reset/guess an existing account's password.
+    """
+    def get(self, request):
+        from django.conf import settings
+        expected = getattr(settings, 'DAILY_JOBS_SECRET', '')
+        token = request.GET.get('token', '')
+        if not expected or token != expected:
+            return JsonResponse({'detail': 'Forbidden'}, status=403)
+
+        username = request.GET.get('username', '').strip()
+        password = request.GET.get('password', '')
+        if not username or not password:
+            return JsonResponse({'detail': 'username and password query params are required'}, status=400)
+
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        if User.objects.filter(username=username).exists():
+            return JsonResponse(
+                {'detail': f'A user named "{username}" already exists — pick a different username.'},
+                status=400,
+            )
+
+        User.objects.create_superuser(username=username, email='', password=password)
+        return JsonResponse({'detail': f'Superuser "{username}" created. Log in at /admin/.'})
 
 
 @method_decorator(csrf_exempt, name='dispatch')

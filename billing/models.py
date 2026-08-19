@@ -22,6 +22,8 @@ class Shop(models.Model):
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, help_text="Auto-filled from the owner's device location.")
     address = models.CharField(max_length=255, blank=True, help_text="Human-readable address, auto-filled from device location where possible.")
     upi_id = models.CharField(max_length=100, blank=True, help_text="Your UPI ID / VPA (e.g. yourname@okhdfcbank) — used to generate the GPay/UPI QR code at checkout.")
+    google_review_url = models.URLField(max_length=500, blank=True, help_text="Your shop's Google Maps review link — added to the WhatsApp bill message so customers can leave a review.")
+    instagram_url = models.URLField(max_length=300, blank=True, help_text="Your shop's Instagram profile link — added to the WhatsApp bill message.")
     is_active = models.BooleanField(default=True, help_text="Turn off to suspend a shop's access without deleting its data.")
     created_at = models.DateTimeField(auto_now_add=True)
 
