@@ -90,7 +90,7 @@
 
   .subtotal-row { display: flex; justify-content: space-between; padding: 12px 0; font-size: 16px; font-weight: 700; border-top: 1px solid var(--panel-border); margin-top: 8px; }
 
-  .pay-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .pay-buttons { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 10px; }
   .pay-buttons button {
     border: none; border-radius: 8px; padding: 13px; font-weight: 700; font-size: 14px; cursor: pointer;
   }
@@ -164,6 +164,7 @@
 {{ shop.upi_id|default:""|json_script:"shop-upi-id-data" }}
 {{ shop.google_review_url|default:""|json_script:"shop-google-review-data" }}
 {{ shop.instagram_url|default:""|json_script:"shop-instagram-data" }}
+{{ shop.youtube_url|default:""|json_script:"shop-youtube-data" }}
 
 <div id="shop-settings-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:50; align-items:center; justify-content:center;">
   <div class="panel" style="max-width:420px; width:90%;">
@@ -192,6 +193,11 @@
         style="width:100%; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; padding:7px 8px; color:var(--text); font-size:13px;">
     </div>
     <div style="margin-bottom:14px;">
+      <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">YouTube link (added to WhatsApp bills)</label>
+      <input type="text" id="shop-youtube-input" value="{{ shop.youtube_url|default:'' }}" placeholder="Your YouTube channel link"
+        style="width:100%; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; padding:7px 8px; color:var(--text); font-size:13px;">
+    </div>
+    <div style="margin-bottom:14px;">
       <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">Location</label>
       <div id="shop-location-display" style="font-size:13px; color:var(--muted); margin-bottom:8px;">
         {% if shop.address %}{{ shop.address }}{% else %}Not set{% endif %}
@@ -215,6 +221,26 @@
     </div>
     <button class="secondary" style="margin-top:0; background:var(--green); color:#0f1720; border:none; font-weight:700;" onclick="confirmGpayPayment()">Payment received — mark as paid</button>
     <button class="secondary" onclick="closeGpayQr()">Cancel</button>
+  </div>
+</div>
+
+<div id="split-payment-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:50; align-items:center; justify-content:center;">
+  <div class="panel" style="max-width:340px; width:90%;">
+    <h2 style="text-align:center;">Split Payment</h2>
+    <div id="split-total-display" style="text-align:center; font-size:24px; font-weight:700; margin-bottom:16px;"></div>
+    <div style="margin-bottom:12px;">
+      <label style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Cash amount &#8377;</label>
+      <input type="number" id="split-cash-input" step="0.01" min="0"
+        style="width:100%; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; padding:9px 10px; color:var(--text); font-size:16px;">
+    </div>
+    <div style="margin-bottom:16px;">
+      <label style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">GPay / UPI amount &#8377;</label>
+      <input type="number" id="split-upi-input" step="0.01" min="0" readonly
+        style="width:100%; background:var(--panel); border:1px solid var(--panel-border); border-radius:6px; padding:9px 10px; color:var(--text); font-size:16px;">
+    </div>
+    <div id="split-error" style="color:var(--red); font-size:12px; margin-bottom:10px; display:none;"></div>
+    <button class="secondary" style="margin-top:0; background:var(--green); color:#0f1720; border:none; font-weight:700;" onclick="confirmSplitPayment()">Confirm &amp; generate bill</button>
+    <button class="secondary" onclick="closeSplitPayment()">Cancel</button>
   </div>
 </div>
 
@@ -304,6 +330,7 @@ const SHOP_NAME = JSON.parse(document.getElementById('shop-name-data').textConte
 let SHOP_UPI_ID = JSON.parse(document.getElementById('shop-upi-id-data').textContent);
 let SHOP_GOOGLE_REVIEW_URL = JSON.parse(document.getElementById('shop-google-review-data').textContent);
 let SHOP_INSTAGRAM_URL = JSON.parse(document.getElementById('shop-instagram-data').textContent);
+let SHOP_YOUTUBE_URL = JSON.parse(document.getElementById('shop-youtube-data').textContent);
 
 let menuItemsById = {};
 let openOrders = {};      // orderId -> order object (with items)
@@ -617,6 +644,7 @@ function renderOrdersList() {
       <div class="pay-buttons">
         <button class="pay-cash-btn" data-action="pay-cash" ${hasItems ? '' : 'disabled'}>Cash</button>
         <button class="pay-upi-btn" data-action="pay-upi" ${hasItems ? '' : 'disabled'}>GPay / UPI</button>
+        <button class="pay-split-btn" data-action="pay-split" ${hasItems ? '' : 'disabled'} style="background:var(--panel-border); color:var(--text); font-weight:700;">Split</button>
       </div>
       <button class="secondary" data-action="cancel">Cancel this order</button>
     `;
@@ -649,6 +677,7 @@ function renderOrdersList() {
     });
     card.querySelector('[data-action="pay-cash"]').addEventListener('click', () => payAndBill(order.id, 'cash'));
     card.querySelector('[data-action="pay-upi"]').addEventListener('click', () => openGpayQr(order.id, order.subtotal));
+    card.querySelector('[data-action="pay-split"]').addEventListener('click', () => openSplitPayment(order.id, order.subtotal));
     card.querySelector('[data-action="cancel"]').addEventListener('click', () => cancelOrder(order.id));
 
     container.appendChild(card);
@@ -721,10 +750,15 @@ async function adjustItemQuantity(orderId, menuItemId, newQuantity, mods = {}) {
   }
 }
 
-async function payAndBill(orderId, paymentMethod) {
+async function payAndBill(orderId, paymentMethod, splitAmounts = null) {
   try {
+    const body = { payment_method: paymentMethod };
+    if (splitAmounts) {
+      body.cash_amount = splitAmounts.cash_amount;
+      body.upi_amount = splitAmounts.upi_amount;
+    }
     const bill = await api(`/api/orders/${orderId}/generate_bill/`, {
-      method: 'POST', body: JSON.stringify({ payment_method: paymentMethod }),
+      method: 'POST', body: JSON.stringify(body),
     });
     delete openOrders[orderId];
     if (activeOrderId === orderId) {
@@ -736,6 +770,55 @@ async function payAndBill(orderId, paymentMethod) {
   } catch (e) {
     showStatus(e.message, 'error');
   }
+}
+
+let splitPendingOrderId = null;
+let splitPendingTotal = 0;
+
+function openSplitPayment(orderId, amount) {
+  splitPendingOrderId = orderId;
+  splitPendingTotal = Number(amount);
+  document.getElementById('split-total-display').textContent = fmt(amount);
+  document.getElementById('split-cash-input').value = '';
+  document.getElementById('split-upi-input').value = '';
+  document.getElementById('split-error').style.display = 'none';
+  document.getElementById('split-payment-modal').style.display = 'flex';
+}
+
+function closeSplitPayment() {
+  document.getElementById('split-payment-modal').style.display = 'none';
+  splitPendingOrderId = null;
+}
+
+document.getElementById('split-cash-input').addEventListener('input', () => {
+  const cash = Number(document.getElementById('split-cash-input').value) || 0;
+  const remaining = Math.max(0, splitPendingTotal - cash);
+  document.getElementById('split-upi-input').value = remaining.toFixed(2);
+});
+
+async function confirmSplitPayment() {
+  const orderId = splitPendingOrderId;
+  if (!orderId) return;
+  const cashInput = Number(document.getElementById('split-cash-input').value);
+  const upiInput = Number(document.getElementById('split-upi-input').value);
+  const errorEl = document.getElementById('split-error');
+
+  if (!cashInput && !upiInput) {
+    errorEl.textContent = 'Enter the cash amount received.';
+    errorEl.style.display = 'block';
+    return;
+  }
+  const sum = Math.round((cashInput + upiInput) * 100) / 100;
+  const total = Math.round(splitPendingTotal * 100) / 100;
+  if (sum !== total) {
+    errorEl.textContent = `Cash + GPay (₹${sum.toFixed(2)}) must add up to the total (₹${total.toFixed(2)}).`;
+    errorEl.style.display = 'block';
+    return;
+  }
+  errorEl.style.display = 'none';
+  document.getElementById('split-payment-modal').style.display = 'none';
+  await payAndBill(orderId, 'split', { cash_amount: cashInput.toFixed(2), upi_amount: upiInput.toFixed(2) });
+  splitPendingOrderId = null;
 }
 
 let gpayPendingOrderId = null;
@@ -809,6 +892,13 @@ async function cancelOrder(orderId) {
 }
 
 
+function paymentMethodLabel(bill) {
+  if (bill.payment_method === 'split') {
+    return `Cash ${fmt(bill.cash_amount)} + GPay ${fmt(bill.upi_amount)}`;
+  }
+  return bill.payment_method === 'upi' ? 'GPay / UPI' : bill.payment_method === 'cash' ? 'Cash' : 'Other';
+}
+
 let lastBill = null;
 
 function showReceipt(bill) {
@@ -817,7 +907,7 @@ function showReceipt(bill) {
   const lines = (bill.order.items || []).map(
     i => `<div class="line"><span>${i.display_name || i.menu_item_name} x${i.quantity}</span><span>${fmt(i.line_total)}</span></div>`
   ).join('');
-  const paymentLabel = bill.payment_method === 'upi' ? 'GPay / UPI' : bill.payment_method === 'cash' ? 'Cash' : 'Other';
+  const paymentLabel = paymentMethodLabel(bill);
   const taxLine = Number(bill.tax_amount) > 0
     ? `<div class="line"><span>Tax (${bill.tax_rate}%)</span><span>${fmt(bill.tax_amount)}</span></div>`
     : '';
@@ -848,7 +938,7 @@ function sendBillOnWhatsapp() {
   const lines = (lastBill.order.items || []).map(
     i => `${i.display_name || i.menu_item_name} x${i.quantity} - ${fmt(i.line_total)}`
   ).join('\n');
-  const paymentLabel = lastBill.payment_method === 'upi' ? 'GPay / UPI' : lastBill.payment_method === 'cash' ? 'Cash' : 'Other';
+  const paymentLabel = paymentMethodLabel(lastBill);
 
   const customerName = (lastBill.order.customer_name || '').trim();
   const thankYouLine = customerName ? `Thank you, ${customerName}!` : `Thank you for your order!`;
@@ -859,6 +949,9 @@ function sendBillOnWhatsapp() {
   }
   if (SHOP_INSTAGRAM_URL) {
     extras += `\n\nFollow us on Instagram:\n${SHOP_INSTAGRAM_URL}`;
+  }
+  if (SHOP_YOUTUBE_URL) {
+    extras += `\n\nSubscribe on YouTube:\n${SHOP_YOUTUBE_URL}`;
   }
 
   const text =
@@ -924,6 +1017,7 @@ async function saveShopSettings() {
   formData.append('upi_id', document.getElementById('shop-upi-id-input').value.trim());
   formData.append('google_review_url', document.getElementById('shop-google-review-input').value.trim());
   formData.append('instagram_url', document.getElementById('shop-instagram-input').value.trim());
+  formData.append('youtube_url', document.getElementById('shop-youtube-input').value.trim());
   if (pendingShopLocation) {
     formData.append('latitude', pendingShopLocation.latitude);
     formData.append('longitude', pendingShopLocation.longitude);
@@ -945,6 +1039,7 @@ async function saveShopSettings() {
     SHOP_UPI_ID = data.upi_id || '';
     SHOP_GOOGLE_REVIEW_URL = data.google_review_url || '';
     SHOP_INSTAGRAM_URL = data.instagram_url || '';
+    SHOP_YOUTUBE_URL = data.youtube_url || '';
     closeShopSettings();
     showStatus('Shop settings saved.', 'success');
   } catch (e) {

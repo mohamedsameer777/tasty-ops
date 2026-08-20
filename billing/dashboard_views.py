@@ -113,6 +113,10 @@ class ShopSettingsView(LoginRequiredMixin, View):
             if instagram_url is not None:
                 shop.instagram_url = instagram_url.strip()
 
+            youtube_url = request.POST.get('youtube_url')
+            if youtube_url is not None:
+                shop.youtube_url = youtube_url.strip()
+
             shop.save()
         except Exception:
             logger.exception("shop-settings save failed for shop id=%s", shop.id)
@@ -127,6 +131,7 @@ class ShopSettingsView(LoginRequiredMixin, View):
             'upi_id': shop.upi_id,
             'google_review_url': shop.google_review_url,
             'instagram_url': shop.instagram_url,
+            'youtube_url': shop.youtube_url,
         })
 
 

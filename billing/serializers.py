@@ -75,13 +75,16 @@ class BillSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Bill
-        fields = ['id', 'order', 'subtotal', 'tax_rate', 'tax_amount', 'total', 'payment_method', 'created_at']
+        fields = ['id', 'order', 'subtotal', 'tax_rate', 'tax_amount', 'total', 'payment_method', 'cash_amount', 'upi_amount', 'created_at']
 
 
 class GenerateBillSerializer(serializers.Serializer):
-    """tax_rate defaults to 0 (no tax) unless you explicitly pass one. payment_method is required."""
+    """tax_rate defaults to 0 (no tax) unless you explicitly pass one. payment_method is required.
+    cash_amount/upi_amount are only used (and required) when payment_method is 'split'."""
     tax_rate = serializers.DecimalField(max_digits=4, decimal_places=2, required=False, default=Decimal('0.00'))
     payment_method = serializers.ChoiceField(choices=Bill.PaymentMethod.choices, default=Bill.PaymentMethod.CASH)
+    cash_amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    upi_amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
 
 
 class IngredientSerializer(serializers.ModelSerializer):

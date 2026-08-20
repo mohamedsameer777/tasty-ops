@@ -24,6 +24,7 @@ class Shop(models.Model):
     upi_id = models.CharField(max_length=100, blank=True, help_text="Your UPI ID / VPA (e.g. yourname@okhdfcbank) — used to generate the GPay/UPI QR code at checkout.")
     google_review_url = models.URLField(max_length=500, blank=True, help_text="Your shop's Google Maps review link — added to the WhatsApp bill message so customers can leave a review.")
     instagram_url = models.URLField(max_length=300, blank=True, help_text="Your shop's Instagram profile link — added to the WhatsApp bill message.")
+    youtube_url = models.URLField(max_length=300, blank=True, help_text="Your shop's YouTube channel link — added to the WhatsApp bill message.")
     is_active = models.BooleanField(default=True, help_text="Turn off to suspend a shop's access without deleting its data.")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -203,6 +204,7 @@ class Bill(models.Model):
     class PaymentMethod(models.TextChoices):
         CASH = 'cash', 'Cash'
         UPI = 'upi', 'GPay / UPI'
+        SPLIT = 'split', 'Split (Cash + GPay)'
         OTHER = 'other', 'Other'
 
     order = models.OneToOneField(Order, related_name='bill', on_delete=models.PROTECT)
@@ -211,6 +213,8 @@ class Bill(models.Model):
     tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     total = models.DecimalField(max_digits=10, decimal_places=2)
     payment_method = models.CharField(max_length=10, choices=PaymentMethod.choices, default=PaymentMethod.CASH, help_text="How the customer paid — used for the end-of-day cash/UPI audit split.")
+    cash_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Only set for split payments — how much of the total was paid in cash.")
+    upi_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Only set for split payments — how much of the total was paid via GPay/UPI.")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

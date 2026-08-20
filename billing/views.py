@@ -1,8 +1,10 @@
 import logging
 
+from datetime import timedelta
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Count, Sum
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -292,11 +294,28 @@ class OrderViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         tax_rate = serializer.validated_data.get('tax_rate', Decimal('0.00'))
         payment_method = serializer.validated_data.get('payment_method', Bill.PaymentMethod.CASH)
+        cash_amount = serializer.validated_data.get('cash_amount')
+        upi_amount = serializer.validated_data.get('upi_amount')
 
         with transaction.atomic():
             subtotal = order.subtotal
             tax_amount = (subtotal * tax_rate / Decimal('100')).quantize(Decimal('0.01'))
             total = subtotal + tax_amount
+
+            if payment_method == Bill.PaymentMethod.SPLIT:
+                if cash_amount is None or upi_amount is None:
+                    return Response(
+                        {'detail': "Split payment needs both cash_amount and upi_amount."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if (cash_amount + upi_amount) != total:
+                    return Response(
+                        {'detail': f"Cash ({cash_amount}) + GPay ({upi_amount}) must add up to the bill total ({total})."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            else:
+                cash_amount = None
+                upi_amount = None
 
             bill = Bill.objects.create(
                 order=order,
@@ -305,6 +324,8 @@ class OrderViewSet(TenantScopedMixin, viewsets.ModelViewSet):
                 tax_amount=tax_amount,
                 total=total,
                 payment_method=payment_method,
+                cash_amount=cash_amount,
+                upi_amount=upi_amount,
             )
             order.status = Order.Status.BILLED
             order.save()
@@ -398,28 +419,78 @@ class BillViewSet(TenantScopedMixin, viewsets.ReadOnlyModelViewSet):
 
         # Payment-method breakdown — this is the end-of-day audit split:
         # cash in the box should match cash_total, UPI should match your
-        # payment app's dashboard for the day.
-        by_method = {method: Decimal('0.00') for method, _ in Bill.PaymentMethod.choices}
-        by_method_count = {method: 0 for method, _ in Bill.PaymentMethod.choices}
+        # payment app's dashboard for the day. Split-payment bills count
+        # their cash_amount toward cash_total and upi_amount toward
+        # upi_total (not the whole bill toward one or the other).
+        cash_total = Decimal('0.00')
+        cash_bill_count = 0
+        upi_total = Decimal('0.00')
+        upi_bill_count = 0
+        other_total = Decimal('0.00')
+        other_bill_count = 0
+
         for b in todays_bills:
-            by_method[b.payment_method] += b.total
-            by_method_count[b.payment_method] += 1
+            if b.payment_method == Bill.PaymentMethod.SPLIT:
+                cash_total += b.cash_amount or Decimal('0.00')
+                upi_total += b.upi_amount or Decimal('0.00')
+                cash_bill_count += 1
+                upi_bill_count += 1
+            elif b.payment_method == Bill.PaymentMethod.CASH:
+                cash_total += b.total
+                cash_bill_count += 1
+            elif b.payment_method == Bill.PaymentMethod.UPI:
+                upi_total += b.total
+                upi_bill_count += 1
+            else:
+                other_total += b.total
+                other_bill_count += 1
 
         response_payload = {
             'date': now.date().isoformat(),
             'bill_count': todays_bills.count(),
             'total_sales': str(total_sales),
-            'cash_total': str(by_method.get(Bill.PaymentMethod.CASH, Decimal('0.00'))),
-            'cash_bill_count': by_method_count.get(Bill.PaymentMethod.CASH, 0),
-            'upi_total': str(by_method.get(Bill.PaymentMethod.UPI, Decimal('0.00'))),
-            'upi_bill_count': by_method_count.get(Bill.PaymentMethod.UPI, 0),
-            'other_total': str(by_method.get(Bill.PaymentMethod.OTHER, Decimal('0.00'))),
-            'other_bill_count': by_method_count.get(Bill.PaymentMethod.OTHER, 0),
+            'cash_total': str(cash_total),
+            'cash_bill_count': cash_bill_count,
+            'upi_total': str(upi_total),
+            'upi_bill_count': upi_bill_count,
+            'other_total': str(other_total),
+            'other_bill_count': other_bill_count,
             'bills': data,
         }
         if page is not None:
             return self.get_paginated_response(response_payload)
         return Response(response_payload)
+
+    @action(detail=False, methods=['get'])
+    def revenue_summary(self, request):
+        """
+        GET /api/bills/revenue_summary/
+        The overall business snapshot — total revenue and bill count for
+        today, this week (Mon-Sun), this month, this year, and all-time.
+        Used for the dashboard's revenue report section.
+        """
+        now = timezone.localtime()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = today_start - timedelta(days=today_start.weekday())
+        month_start = today_start.replace(day=1)
+        year_start = today_start.replace(month=1, day=1)
+
+        qs = self.get_queryset()
+
+        def summarize(filtered_qs):
+            agg = filtered_qs.aggregate(total=Sum('total'), count=Count('id'))
+            return {
+                'total': str(agg['total'] or Decimal('0.00')),
+                'bill_count': agg['count'] or 0,
+            }
+
+        return Response({
+            'today': summarize(qs.filter(created_at__gte=today_start)),
+            'this_week': summarize(qs.filter(created_at__gte=week_start)),
+            'this_month': summarize(qs.filter(created_at__gte=month_start)),
+            'this_year': summarize(qs.filter(created_at__gte=year_start)),
+            'all_time': summarize(qs),
+        })
 
 
 class IngredientViewSet(TenantScopedMixin, viewsets.ModelViewSet):
