@@ -75,7 +75,7 @@ class BillSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Bill
-        fields = ['id', 'order', 'subtotal', 'tax_rate', 'tax_amount', 'total', 'payment_method', 'cash_amount', 'upi_amount', 'created_at']
+        fields = ['id', 'daily_number', 'order', 'subtotal', 'tax_rate', 'tax_amount', 'total', 'payment_method', 'cash_amount', 'upi_amount', 'created_at']
 
 
 class GenerateBillSerializer(serializers.Serializer):

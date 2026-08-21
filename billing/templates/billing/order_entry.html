@@ -913,7 +913,7 @@ function showReceipt(bill) {
     : '';
   document.getElementById('receipt-content').innerHTML = `
     <div>${SHOP_NAME}</div>
-    <div>Bill #${bill.id} — ${new Date(bill.created_at).toLocaleString('en-IN')}</div>
+    <div>Bill #${bill.daily_number} — ${new Date(bill.created_at).toLocaleString('en-IN')}</div>
     <hr>
     ${lines}
     <hr>
@@ -956,7 +956,7 @@ function sendBillOnWhatsapp() {
 
   const text =
     `*${SHOP_NAME}*\n` +
-    `Bill #${lastBill.id} - ${new Date(lastBill.created_at).toLocaleString('en-IN')}\n\n` +
+    `Bill #${lastBill.daily_number} - ${new Date(lastBill.created_at).toLocaleString('en-IN')}\n\n` +
     `${lines}\n\n` +
     `Subtotal: ${fmt(lastBill.subtotal)}\n` +
     (Number(lastBill.tax_amount) > 0 ? `Tax: ${fmt(lastBill.tax_amount)}\n` : '') +

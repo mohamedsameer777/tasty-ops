@@ -215,10 +215,22 @@ class Bill(models.Model):
     payment_method = models.CharField(max_length=10, choices=PaymentMethod.choices, default=PaymentMethod.CASH, help_text="How the customer paid — used for the end-of-day cash/UPI audit split.")
     cash_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Only set for split payments — how much of the total was paid in cash.")
     upi_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Only set for split payments — how much of the total was paid via GPay/UPI.")
+    daily_number = models.PositiveIntegerField(
+        editable=False, null=True, blank=True,
+        help_text="A clean, human-friendly bill number that resets to 1 each day (e.g. 'Bill 3') — separate from the database id.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        if self.pk is None and self.daily_number is None:
+            from django.utils import timezone
+            today = timezone.localdate()
+            todays_count = Bill.objects.filter(order__shop=self.order.shop, created_at__date=today).count()
+            self.daily_number = todays_count + 1
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Bill #{self.id} — ₹{self.total} ({self.created_at:%Y-%m-%d %H:%M})"
