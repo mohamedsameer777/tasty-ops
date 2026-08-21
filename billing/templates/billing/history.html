@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>History — {{ shop.name|default:"Tasty Zone" }}</title>
+<link rel="manifest" href="/static/billing/manifest.json">
+<meta name="theme-color" content="#0f1720">
+<link rel="apple-touch-icon" href="/static/billing/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tasty Zone">
+<style>
+  :root {
+    --bg: #0f1720; --panel: #17212c; --panel-border: #24313f;
+    --text: #e8edf2; --muted: #8a97a3; --accent: #ff8a3d;
+    --accent-2: #2dd4bf; --green: #34d399; --amber: #fbbf24; --red: #f87171; --blue: #60a5fa;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f6f8; --panel: #ffffff; --panel-border: #dde3e8;
+    --text: #16202a; --muted: #5b6b78; --accent: #ff8a3d;
+    --accent-2: #0d7d70; --green: #059669; --amber: #b45309; --red: #dc2626; --blue: #2563eb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 24px;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    max-width: 900px; margin: 0 auto 20px; flex-wrap: wrap; gap: 12px;
+  }
+  header h1 { margin: 0; font-size: 22px; }
+  header h1 span { color: var(--accent); }
+  nav a { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: 14px; }
+  nav a.active { color: var(--accent-2); }
+  .container { max-width: 900px; margin: 0 auto; }
+
+  .panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 12px; padding: 18px 20px; margin-bottom: 20px; }
+  .panel h2 { font-size: 13px; margin: 0 0 14px; color: var(--accent-2); text-transform: uppercase; letter-spacing: 0.04em; }
+
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .compare-card { background: var(--bg); border: 1px solid var(--panel-border); border-radius: 10px; padding: 16px; }
+  .compare-card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .compare-card .value { font-size: 26px; font-weight: 700; margin-top: 6px; }
+  .compare-card .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+  .day-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 4px; border-bottom: 1px solid var(--panel-border); cursor: pointer;
+  }
+  .day-row:last-child { border-bottom: none; }
+  .day-row:hover { background: var(--bg); }
+  .day-row .date { font-weight: 600; }
+  .day-row .meta { color: var(--muted); font-size: 12px; }
+  .day-row .amount { font-weight: 700; font-size: 15px; }
+
+  .bill-card { background: var(--bg); border: 1px solid var(--panel-border); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+  .bill-card-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .bill-card-header .bill-num { font-weight: 700; }
+  .bill-card-header .bill-time { color: var(--muted); font-size: 12px; }
+  .bill-items { font-size: 13px; color: var(--muted); }
+  .bill-items .line { display: flex; justify-content: space-between; padding: 2px 0; }
+  .bill-total-row { display: flex; justify-content: space-between; font-weight: 700; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--panel-border); }
+  .bill-pay-label { font-size: 12px; color: var(--accent-2); margin-top: 4px; }
+
+  .empty { color: var(--muted); font-size: 13.5px; padding: 10px 0; }
+  button.secondary {
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+    padding: 8px 14px; color: var(--text); font-size: 13px; cursor: pointer;
+  }
+  #back-to-days-btn { margin-bottom: 14px; display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>{{ shop.name|default:"Tasty Zone" }} <span>History</span></h1>
+  <div style="display:flex; align-items:center; gap:8px;">
+    <nav>
+      <a href="/dashboard/">Dashboard</a>
+      <a href="/history/" class="active">History</a>
+      <a href="/billing/">Billing</a>
+    </nav>
+    <button id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle dark/light theme"
+      style="background:var(--panel); border:1px solid var(--panel-border); color:var(--text); padding:6px 10px; border-radius:8px; cursor:pointer; font-size:13px; margin-left:10px;">☀️</button>
+  </div>
+</header>
+
+<div class="container">
+
+  <div class="panel">
+    <h2>Yesterday vs Today</h2>
+    <div class="compare-grid">
+      <div class="compare-card">
+        <div class="label">Yesterday</div>
+        <div class="value" id="cmp-yesterday-total">—</div>
+        <div class="sub"><span id="cmp-yesterday-count">0</span> bills</div>
+      </div>
+      <div class="compare-card">
+        <div class="label">Today</div>
+        <div class="value" id="cmp-today-total">—</div>
+        <div class="sub"><span id="cmp-today-count">0</span> bills</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="days-panel">
+    <h2>Last 30 Days</h2>
+    <div id="days-list"></div>
+  </div>
+
+  <div class="panel" id="day-detail-panel" style="display:none;">
+    <button class="secondary" id="back-to-days-btn" onclick="showDaysList()">&larr; Back to all days</button>
+    <h2 id="day-detail-heading">Bills</h2>
+    <div id="day-detail-total" style="font-size:15px; margin-bottom:14px; color:var(--muted);"></div>
+    <div id="day-detail-bills"></div>
+  </div>
+
+</div>
+
+<script>
+function initTheme() {
+  const saved = localStorage.getItem('tasty-ops-theme') || 'dark';
+  document.documentElement.dataset.theme = saved;
+  const btn = document.getElementById('theme-toggle-btn');
+  if (btn) btn.textContent = saved === 'light' ? '🌙' : '☀️';
+}
+function toggleTheme() {
+  const current = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+  const next = current === 'light' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('tasty-ops-theme', next);
+  const btn = document.getElementById('theme-toggle-btn');
+  if (btn) btn.textContent = next === 'light' ? '🌙' : '☀️';
+}
+initTheme();
+
+function fmt(n) { return '\u20B9' + Number(n).toFixed(2); }
+
+async function getJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url} -> ${res.status}`);
+  return res.json();
+}
+
+function formatDateLabel(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function paymentMethodLabel(bill) {
+  if (bill.payment_method === 'split') {
+    return `Cash ${fmt(bill.cash_amount)} + GPay ${fmt(bill.upi_amount)}`;
+  }
+  const labels = { upi: 'GPay / UPI', cash: 'Cash', other: 'Other' };
+  return labels[bill.payment_method] || bill.payment_method;
+}
+
+let allDaysData = [];
+
+async function loadHistory() {
+  try {
+    const data = await getJSON('/api/bills/history/');
+    document.getElementById('cmp-yesterday-total').textContent = fmt(data.yesterday.total);
+    document.getElementById('cmp-yesterday-count').textContent = data.yesterday.bill_count;
+    document.getElementById('cmp-today-total').textContent = fmt(data.today.total);
+    document.getElementById('cmp-today-count').textContent = data.today.bill_count;
+
+    allDaysData = data.daily_totals || [];
+    renderDaysList();
+  } catch (e) {
+    document.getElementById('days-list').innerHTML = `<div class="empty">Could not load history: ${e.message}</div>`;
+  }
+}
+
+function renderDaysList() {
+  const container = document.getElementById('days-list');
+  if (allDaysData.length === 0) {
+    container.innerHTML = '<div class="empty">No bills yet.</div>';
+    return;
+  }
+  container.innerHTML = allDaysData.map(day => `
+    <div class="day-row" onclick="showDayDetail('${day.date}')">
+      <div>
+        <div class="date">${formatDateLabel(day.date)}</div>
+        <div class="meta">${day.bill_count} bill${day.bill_count === 1 ? '' : 's'}</div>
+      </div>
+      <div class="amount">${fmt(day.total)}</div>
+    </div>
+  `).join('');
+}
+
+async function showDayDetail(dateStr) {
+  document.getElementById('days-panel').style.display = 'none';
+  document.getElementById('day-detail-panel').style.display = 'block';
+  document.getElementById('back-to-days-btn').style.display = 'inline-block';
+  document.getElementById('day-detail-heading').textContent = formatDateLabel(dateStr);
+  document.getElementById('day-detail-bills').innerHTML = '<div class="empty">Loading…</div>';
+
+  try {
+    const data = await getJSON(`/api/bills/history/?date=${dateStr}`);
+    document.getElementById('day-detail-total').textContent = `${fmt(data.total)} across ${data.bill_count} bill${data.bill_count === 1 ? '' : 's'}`;
+
+    if (!data.bills.length) {
+      document.getElementById('day-detail-bills').innerHTML = '<div class="empty">No bills that day.</div>';
+      return;
+    }
+
+    document.getElementById('day-detail-bills').innerHTML = data.bills.map(bill => {
+      const order = bill.order || {};
+      const customerLabel = order.customer_name ? ` — ${order.customer_name}` : '';
+      const items = (order.items || []).map(i => `
+        <div class="line"><span>${i.display_name || i.menu_item_name} x${i.quantity}</span><span>${fmt(i.line_total)}</span></div>
+      `).join('');
+      const time = new Date(bill.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      return `
+        <div class="bill-card">
+          <div class="bill-card-header">
+            <span class="bill-num">Bill #${bill.daily_number}${customerLabel}</span>
+            <span class="bill-time">${time}</span>
+          </div>
+          <div class="bill-items">${items}</div>
+          <div class="bill-total-row"><span>Total</span><span>${fmt(bill.total)}</span></div>
+          <div class="bill-pay-label">${paymentMethodLabel(bill)}</div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    document.getElementById('day-detail-bills').innerHTML = `<div class="empty">Could not load that day: ${e.message}</div>`;
+  }
+}
+
+function showDaysList() {
+  document.getElementById('day-detail-panel').style.display = 'none';
+  document.getElementById('days-panel').style.display = 'block';
+}
+
+loadHistory();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('SW registration failed:', e));
+  });
+}
+</script>
+
+</body>
+</html>

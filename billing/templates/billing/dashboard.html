@@ -153,6 +153,7 @@
   <div style="display:flex; align-items:center; gap:18px;">
     <nav style="display:flex; gap:4px;">
       <a href="/dashboard/" style="color:var(--accent-2); text-decoration:none; font-size:14px;">Dashboard</a>
+      <a href="/history/" style="color:var(--muted); text-decoration:none; font-size:14px; margin-left:18px;">History</a>
       <a href="/billing/" style="color:var(--muted); text-decoration:none; font-size:14px; margin-left:18px;">Billing</a>
       <form method="post" action="/accounts/logout/" style="display:inline;">
         {% csrf_token %}
@@ -198,6 +199,37 @@
         <div class="label" style="color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:0.04em;">GPay / UPI</div>
         <div style="font-size:24px; font-weight:700; margin-top:4px;" id="stat-upi-total">—</div>
         <div style="color:var(--muted); font-size:12px; margin-top:2px;"><span id="stat-upi-count">0</span> bills</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="revenue-report-panel">
+    <h2>Revenue Report</h2>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:12px;">
+      <div style="background:var(--bg); border:1px solid var(--panel-border); border-radius:10px; padding:12px;">
+        <div class="label" style="color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:0.04em;">Today</div>
+        <div style="font-size:19px; font-weight:700; margin-top:4px;" id="rev-today">—</div>
+        <div style="color:var(--muted); font-size:11px; margin-top:2px;"><span id="rev-today-count">0</span> bills</div>
+      </div>
+      <div style="background:var(--bg); border:1px solid var(--panel-border); border-radius:10px; padding:12px;">
+        <div class="label" style="color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:0.04em;">This Week</div>
+        <div style="font-size:19px; font-weight:700; margin-top:4px;" id="rev-week">—</div>
+        <div style="color:var(--muted); font-size:11px; margin-top:2px;"><span id="rev-week-count">0</span> bills</div>
+      </div>
+      <div style="background:var(--bg); border:1px solid var(--panel-border); border-radius:10px; padding:12px;">
+        <div class="label" style="color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:0.04em;">This Month</div>
+        <div style="font-size:19px; font-weight:700; margin-top:4px;" id="rev-month">—</div>
+        <div style="color:var(--muted); font-size:11px; margin-top:2px;"><span id="rev-month-count">0</span> bills</div>
+      </div>
+      <div style="background:var(--bg); border:1px solid var(--panel-border); border-radius:10px; padding:12px;">
+        <div class="label" style="color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:0.04em;">This Year</div>
+        <div style="font-size:19px; font-weight:700; margin-top:4px;" id="rev-year">—</div>
+        <div style="color:var(--muted); font-size:11px; margin-top:2px;"><span id="rev-year-count">0</span> bills</div>
+      </div>
+      <div style="background:rgba(255,138,61,0.1); border:1px solid var(--accent); border-radius:10px; padding:12px;">
+        <div class="label" style="color:var(--accent); font-size:11px; text-transform:uppercase; letter-spacing:0.04em;">Overall Revenue</div>
+        <div style="font-size:19px; font-weight:700; margin-top:4px; color:var(--accent);" id="rev-all-time">—</div>
+        <div style="color:var(--muted); font-size:11px; margin-top:2px;"><span id="rev-all-time-count">0</span> bills</div>
       </div>
     </div>
   </div>
@@ -308,6 +340,19 @@ async function loadDashboard() {
     document.getElementById('stat-sales').textContent = 'error';
   }
 
+  // Revenue report — today / week / month / year / all-time
+  try {
+    const rev = await getJSON('/api/bills/revenue_summary/');
+    const periods = { today: 'rev-today', this_week: 'rev-week', this_month: 'rev-month', this_year: 'rev-year', all_time: 'rev-all-time' };
+    for (const [key, elPrefix] of Object.entries(periods)) {
+      const data = rev[key] || { total: 0, bill_count: 0 };
+      document.getElementById(elPrefix).textContent = fmtMoney(data.total);
+      document.getElementById(elPrefix + '-count').textContent = data.bill_count;
+    }
+  } catch (e) {
+    document.getElementById('rev-all-time').textContent = 'error';
+  }
+
   // Low stock
   try {
     const low = await getJSON('/api/ingredients/low_stock/');
@@ -330,7 +375,12 @@ async function loadDashboard() {
 
   // Tomorrow's forecast
   try {
-    const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+    // Use the browser's LOCAL calendar date, not UTC — toISOString() converts
+    // to UTC first, which during 12:00-5:30 AM IST would compute "tomorrow"
+    // as one day too early (still the previous day in UTC).
+    const now = new Date();
+    const tomorrowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const tomorrow = `${tomorrowDate.getFullYear()}-${String(tomorrowDate.getMonth() + 1).padStart(2, '0')}-${String(tomorrowDate.getDate()).padStart(2, '0')}`;
     const forecasts = await getJSON(`/api/forecasts/?forecast_date=${tomorrow}`);
     const rows = forecasts.results || forecasts;
     const tbody = document.querySelector('#forecast-table tbody');

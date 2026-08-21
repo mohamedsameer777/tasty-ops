@@ -130,7 +130,9 @@ class Order(models.Model):
         if self.pk is None and self.daily_number is None:
             from django.utils import timezone
             today = timezone.localdate()
-            todays_count = Order.objects.filter(shop=self.shop, created_at__date=today).count()
+            todays_count = Order.objects.filter(
+                shop=self.shop, created_at__date=today,
+            ).exclude(status=Order.Status.CANCELLED).count()
             self.daily_number = todays_count + 1
         super().save(*args, **kwargs)
 

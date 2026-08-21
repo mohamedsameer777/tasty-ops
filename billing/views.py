@@ -1,10 +1,11 @@
 import logging
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Count, Sum
+from django.db.models.functions import TruncDate
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -362,6 +363,60 @@ class BillViewSet(TenantScopedMixin, viewsets.ReadOnlyModelViewSet):
     queryset = Bill.objects.select_related('order').prefetch_related('order__items__menu_item').all()
     serializer_class = BillSerializer
     shop_lookup = 'order__shop'
+
+    @action(detail=False, methods=['get'])
+    def history(self, request):
+        """
+        GET /api/bills/history/
+        GET /api/bills/history/?date=2026-08-15
+        Without ?date: returns yesterday's and today's totals (for a quick
+        glance), plus a day-by-day total for the last 30 days — like a
+        payment app's transaction history.
+        With ?date=YYYY-MM-DD: returns every bill from that specific day,
+        each with its full item breakdown, so you can see exactly what
+        each order bought.
+        """
+        from datetime import timedelta
+        qs = self.get_queryset()
+
+        date_param = request.query_params.get('date')
+        if date_param:
+            try:
+                target_date = datetime.strptime(date_param, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({'detail': 'date must be in YYYY-MM-DD format.'}, status=status.HTTP_400_BAD_REQUEST)
+            days_bills = qs.filter(created_at__date=target_date).order_by('daily_number')
+            serializer = self.get_serializer(days_bills, many=True)
+            total = sum((b.total for b in days_bills), Decimal('0.00'))
+            return Response({
+                'date': target_date.isoformat(),
+                'total': str(total),
+                'bill_count': days_bills.count(),
+                'bills': serializer.data,
+            })
+
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
+        thirty_days_ago = today - timedelta(days=29)
+
+        def day_summary(day):
+            agg = qs.filter(created_at__date=day).aggregate(total=Sum('total'), count=Count('id'))
+            return {'date': day.isoformat(), 'total': str(agg['total'] or Decimal('0.00')), 'bill_count': agg['count'] or 0}
+
+        daily = (
+            qs.filter(created_at__date__gte=thirty_days_ago)
+            .annotate(day=TruncDate('created_at'))
+            .values('day')
+            .annotate(total=Sum('total'), count=Count('id'))
+            .order_by('-day')
+        )
+        daily_totals = [{'date': str(row['day']), 'total': str(row['total']), 'bill_count': row['count']} for row in daily]
+
+        return Response({
+            'today': day_summary(today),
+            'yesterday': day_summary(yesterday),
+            'daily_totals': daily_totals,
+        })
 
     @action(detail=True, methods=['post'])
     def send_whatsapp(self, request, pk=None):

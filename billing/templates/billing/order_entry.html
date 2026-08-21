@@ -150,6 +150,7 @@
   <nav>
     <a href="/billing/" class="active">Billing</a>
     <a href="/dashboard/">Dashboard</a>
+    <a href="/history/">History</a>
     <a href="#" onclick="openShopSettings(); return false;">Shop Settings</a>
     <form method="post" action="/accounts/logout/" style="display:inline;">
       {% csrf_token %}
@@ -646,8 +647,11 @@ function renderOrdersList() {
         <button class="pay-upi-btn" data-action="pay-upi" ${hasItems ? '' : 'disabled'}>GPay / UPI</button>
         <button class="pay-split-btn" data-action="pay-split" ${hasItems ? '' : 'disabled'} style="background:var(--panel-border); color:var(--text); font-weight:700;">Split</button>
       </div>
+      <button class="secondary" data-action="share-bill" ${hasItems ? '' : 'disabled'} style="background:#25D366; color:#0f1720; border:none; font-weight:700;">Share bill on WhatsApp (not paid yet)</button>
       <button class="secondary" data-action="cancel">Cancel this order</button>
     `;
+
+    card.querySelector('[data-action="share-bill"]').addEventListener('click', () => shareBillInProgress(order.id));
 
     card.querySelector('[data-action="select"]').addEventListener('click', () => selectOrder(order.id));
     card.querySelector(`#customer-name-${order.id}`).addEventListener('change', () => saveCustomerInfo(order.id));
@@ -817,14 +821,26 @@ async function confirmSplitPayment() {
   }
   errorEl.style.display = 'none';
   document.getElementById('split-payment-modal').style.display = 'none';
-  await payAndBill(orderId, 'split', { cash_amount: cashInput.toFixed(2), upi_amount: upiInput.toFixed(2) });
+
+  const splitAmounts = { cash_amount: cashInput.toFixed(2), upi_amount: upiInput.toFixed(2) };
+
+  if (upiInput > 0) {
+    // Show the GPay QR for just the remaining UPI portion — confirmGpayPayment()
+    // will finalize this as a split bill (not a plain UPI bill) once paid.
+    openGpayQr(orderId, upiInput, splitAmounts);
+  } else {
+    // Entirely cash, entered through the Split screen — no QR needed.
+    await payAndBill(orderId, 'split', splitAmounts);
+  }
   splitPendingOrderId = null;
 }
 
 let gpayPendingOrderId = null;
+let gpayPendingSplit = null;
 
-function openGpayQr(orderId, amount) {
+function openGpayQr(orderId, amount, splitAmounts = null) {
   gpayPendingOrderId = orderId;
+  gpayPendingSplit = splitAmounts;
   document.getElementById('gpay-qr-amount').textContent = fmt(amount);
   const canvasWrap = document.getElementById('gpay-qr-canvas-wrap');
   const noUpiMsg = document.getElementById('gpay-qr-no-upi');
@@ -866,14 +882,21 @@ function openGpayQr(orderId, amount) {
 function closeGpayQr() {
   document.getElementById('gpay-qr-modal').style.display = 'none';
   gpayPendingOrderId = null;
+  gpayPendingSplit = null;
 }
 
 function confirmGpayPayment() {
   if (!gpayPendingOrderId) return;
   const orderId = gpayPendingOrderId;
+  const splitAmounts = gpayPendingSplit;
   document.getElementById('gpay-qr-modal').style.display = 'none';
   gpayPendingOrderId = null;
-  payAndBill(orderId, 'upi');
+  gpayPendingSplit = null;
+  if (splitAmounts) {
+    payAndBill(orderId, 'split', splitAmounts);
+  } else {
+    payAndBill(orderId, 'upi');
+  }
 }
 
 async function cancelOrder(orderId) {
@@ -922,6 +945,47 @@ function showReceipt(bill) {
     <div class="line"><strong>Total</strong><strong>${fmt(bill.total)}</strong></div>
     <div class="line"><span>Paid via</span><span>${paymentLabel}</span></div>
   `;
+}
+
+function shareBillInProgress(orderId) {
+  const order = openOrders[orderId];
+  if (!order || !order.items || order.items.length === 0) {
+    showStatus('Add items before sharing a bill.', 'error');
+    return;
+  }
+
+  let phone = (order.customer_phone || '').replace(/[^0-9]/g, '');
+  if (!phone) {
+    phone = (window.prompt('Customer phone number (with country code, e.g. 919876543210):') || '').replace(/[^0-9]/g, '');
+    if (!phone) return;
+  }
+  if (phone.length === 10) phone = '91' + phone;
+
+  let customerName = (order.customer_name || '').trim();
+  if (!customerName) {
+    customerName = (window.prompt("Customer's name (for the bill greeting):") || '').trim();
+  }
+
+  const lines = (order.items || []).map(
+    i => `${i.display_name || i.menu_item_name} x${i.quantity} - ${fmt(i.line_total)}`
+  ).join('\n');
+  const greeting = customerName ? `Hi ${customerName},` : `Hi,`;
+
+  let extras = '';
+  if (SHOP_GOOGLE_REVIEW_URL) extras += `\n\nEnjoyed your food? A quick review means a lot to us:\n${SHOP_GOOGLE_REVIEW_URL}`;
+  if (SHOP_INSTAGRAM_URL) extras += `\n\nFollow us on Instagram:\n${SHOP_INSTAGRAM_URL}`;
+  if (SHOP_YOUTUBE_URL) extras += `\n\nSubscribe on YouTube:\n${SHOP_YOUTUBE_URL}`;
+
+  const text =
+    `*${SHOP_NAME}*\n` +
+    `${greeting} here's your bill so far — Order ${order.daily_number}\n\n` +
+    `${lines}\n\n` +
+    `*Total: ${fmt(order.subtotal)}*\n\n` +
+    `(This order hasn't been marked as paid yet.)` +
+    extras;
+
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank');
 }
 
 function sendBillOnWhatsapp() {

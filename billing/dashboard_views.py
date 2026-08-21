@@ -52,6 +52,21 @@ class DashboardView(LoginRequiredMixin, TemplateView):
         return context
 
 
+class HistoryView(LoginRequiredMixin, TemplateView):
+    """
+    Payment-app-style transaction history — yesterday/today totals, a
+    day-by-day list going back 30 days, and per-day bill detail with full
+    item breakdowns. Pulls data from /api/bills/history/.
+    """
+    template_name = 'billing/history.html'
+
+    def get_context_data(self, **kwargs):
+        from .tenancy import get_shop_for_user
+        context = super().get_context_data(**kwargs)
+        context['shop'] = get_shop_for_user(self.request.user)
+        return context
+
+
 class OrderEntryView(LoginRequiredMixin, TemplateView):
     """The billing / order-entry page — punch in orders and generate bills from the browser."""
     template_name = 'billing/order_entry.html'
