@@ -4,8 +4,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Count, Sum
-from django.db.models.functions import TruncDate
+from django.db.models import Count, F, Sum
+from django.db.models.functions import ExtractHour, TruncDate
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -416,6 +416,119 @@ class BillViewSet(TenantScopedMixin, viewsets.ReadOnlyModelViewSet):
             'today': day_summary(today),
             'yesterday': day_summary(yesterday),
             'daily_totals': daily_totals,
+        })
+
+    @action(detail=False, methods=['get'])
+    def analytics(self, request):
+        """
+        GET /api/bills/analytics/?days=30
+        The "spending insights" page — sales trend over the period, your
+        best-selling items, revenue by menu category, cash/GPay/split
+        breakdown, and which hours of the day are busiest.
+        """
+        from datetime import timedelta
+
+        try:
+            days = int(request.query_params.get('days', 30))
+        except ValueError:
+            days = 30
+        days = max(1, min(days, 90))
+
+        today = timezone.localdate()
+        start_date = today - timedelta(days=days - 1)
+
+        qs = self.get_queryset().filter(created_at__date__gte=start_date)
+
+        # Daily sales trend, oldest first (good for a left-to-right chart).
+        daily = (
+            qs.annotate(day=TruncDate('created_at'))
+            .values('day')
+            .annotate(total=Sum('total'), count=Count('id'))
+            .order_by('day')
+        )
+        daily_by_date = {str(row['day']): row for row in daily}
+        trend = []
+        for i in range(days):
+            d = start_date + timedelta(days=i)
+            row = daily_by_date.get(str(d))
+            trend.append({
+                'date': d.isoformat(),
+                'total': str(row['total']) if row else '0.00',
+                'bill_count': row['count'] if row else 0,
+            })
+
+        # Payment method breakdown — split bills count their two halves
+        # toward cash/upi separately, same logic as the today/ endpoint.
+        cash_total = upi_total = other_total = Decimal('0.00')
+        for b in qs:
+            if b.payment_method == Bill.PaymentMethod.SPLIT:
+                cash_total += b.cash_amount or Decimal('0.00')
+                upi_total += b.upi_amount or Decimal('0.00')
+            elif b.payment_method == Bill.PaymentMethod.CASH:
+                cash_total += b.total
+            elif b.payment_method == Bill.PaymentMethod.UPI:
+                upi_total += b.total
+            else:
+                other_total += b.total
+
+        # Best-selling items, by revenue — join through Order to reach
+        # OrderItem for bills in this window.
+        order_ids = qs.values_list('order_id', flat=True)
+        item_rows = (
+            OrderItem.objects.filter(order_id__in=order_ids)
+            .values('menu_item__name')
+            .annotate(
+                quantity=Sum('quantity'),
+                revenue=Sum(F('unit_price') * F('quantity')),
+            )
+            .order_by('-revenue')[:8]
+        )
+        top_items = [
+            {'name': row['menu_item__name'], 'quantity': row['quantity'], 'revenue': str(row['revenue'] or Decimal('0.00'))}
+            for row in item_rows
+        ]
+
+        # Revenue by menu category.
+        category_rows = (
+            OrderItem.objects.filter(order_id__in=order_ids)
+            .values('menu_item__category')
+            .annotate(revenue=Sum(F('unit_price') * F('quantity')))
+            .order_by('-revenue')
+        )
+        category_breakdown = [
+            {'category': row['menu_item__category'], 'revenue': str(row['revenue'] or Decimal('0.00'))}
+            for row in category_rows
+        ]
+
+        # Busiest hours of the day (0-23), by bill count.
+        hour_rows = (
+            qs.annotate(hour=ExtractHour('created_at'))
+            .values('hour')
+            .annotate(count=Count('id'))
+            .order_by('hour')
+        )
+        hour_counts = {row['hour']: row['count'] for row in hour_rows}
+        peak_hours = [{'hour': h, 'count': hour_counts.get(h, 0)} for h in range(24)]
+
+        total_revenue = sum((Decimal(t['total']) for t in trend), Decimal('0.00'))
+        total_bills = sum((t['bill_count'] for t in trend), 0)
+
+        return Response({
+            'period_days': days,
+            'start_date': start_date.isoformat(),
+            'end_date': today.isoformat(),
+            'total_revenue': str(total_revenue),
+            'total_bills': total_bills,
+            'avg_bill_value': str((total_revenue / total_bills).quantize(Decimal('0.01'))) if total_bills else '0.00',
+            'daily_trend': trend,
+            'payment_breakdown': {
+                'cash': str(cash_total),
+                'upi': str(upi_total),
+                'other': str(other_total),
+            },
+            'top_items': top_items,
+            'category_breakdown': category_breakdown,
+            'peak_hours': peak_hours,
         })
 
     @action(detail=True, methods=['post'])

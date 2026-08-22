@@ -21,7 +21,7 @@ from django.views.static import serve
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from billing.dashboard_views import (
-    BootstrapAdminView, DashboardView, HistoryView, OrderEntryView, RunDailyJobsView, ServiceWorkerView, ShopSettingsView, SignupView,
+    AnalyticsView, BootstrapAdminView, DashboardView, HistoryView, OrderEntryView, RunDailyJobsView, ServiceWorkerView, ShopSettingsView, SignupView,
 )
 
 urlpatterns = [
@@ -33,6 +33,7 @@ urlpatterns = [
     path('accounts/', include('django.contrib.auth.urls')),
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
     path('history/', HistoryView.as_view(), name='history'),
+    path('analytics/', AnalyticsView.as_view(), name='analytics'),
     path('billing/', OrderEntryView.as_view(), name='order-entry'),
     path('shop-settings/', ShopSettingsView.as_view(), name='shop-settings'),
     path('sw.js', ServiceWorkerView.as_view(), name='service-worker'),

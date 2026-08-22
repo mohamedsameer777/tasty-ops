@@ -67,6 +67,21 @@ class HistoryView(LoginRequiredMixin, TemplateView):
         return context
 
 
+class AnalyticsView(LoginRequiredMixin, TemplateView):
+    """
+    Spending-insights-style analytics — sales trend, best sellers,
+    category breakdown, payment split, and peak hours. Pulls data from
+    /api/bills/analytics/.
+    """
+    template_name = 'billing/analytics.html'
+
+    def get_context_data(self, **kwargs):
+        from .tenancy import get_shop_for_user
+        context = super().get_context_data(**kwargs)
+        context['shop'] = get_shop_for_user(self.request.user)
+        return context
+
+
 class OrderEntryView(LoginRequiredMixin, TemplateView):
     """The billing / order-entry page — punch in orders and generate bills from the browser."""
     template_name = 'billing/order_entry.html'
