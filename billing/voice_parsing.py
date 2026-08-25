@@ -40,6 +40,17 @@ FILLER_WORDS = {
     'pc', 'pcs', 'item', 'items', 'and', 'with',
 }
 
+# Leading command/filler words to strip before we even look for a quantity —
+# "give me two burgers", "please add one momo", "I want three fries".
+LEADING_FILLERS = {
+    'give', 'me', 'please', 'i', 'want', 'need', 'order', 'get', 'add',
+    'the', 'okay', 'ok', 'um', 'uh', 'can', 'you',
+}
+
+# Words that are already the menu-name form and must never be singularized
+# further — e.g. "fries" must stay "fries", not become "fry".
+NO_SINGULARIZE = {'fries'}
+
 # How confident a name match needs to be before we auto-add it rather than
 # flag it for the person to check by hand.
 MATCH_THRESHOLD = 0.55
@@ -48,27 +59,11 @@ MATCH_THRESHOLD = 0.55
 def _singularize(word):
     """Very small, food-menu-appropriate plural stripper: burgers -> burger,
     fries stays fries (menu items are often already plural), momos -> momo."""
+    if word in NO_SINGULARIZE:
+        return word
     if len(word) > 3 and word.endswith('ies'):
         return word[:-3] + 'y'
-    if len(word) > 4 and word.endswith('s') and not word.endswith('ss') and not word.endswith('fries'):
-        return word[:-1]
-    return word
-
-
-# Leading command/filler words to strip before we even look for a quantity —
-# "give me two burgers", "please add one momo", "I want three fries".
-LEADING_FILLERS = {
-    'give', 'me', 'please', 'i', 'want', 'need', 'order', 'get', 'add',
-    'the', 'okay', 'ok', 'um', 'uh', 'can', 'you',
-}
-
-
-def _singularize(word):
-    """Very small, food-menu-appropriate plural stripper: burgers -> burger,
-    fries stays fries (menu items are often already plural), momos -> momo."""
-    if len(word) > 3 and word.endswith('ies'):
-        return word[:-3] + 'y'
-    if len(word) > 4 and word.endswith('s') and not word.endswith('ss') and not word.endswith('fries'):
+    if len(word) > 4 and word.endswith('s') and not word.endswith('ss'):
         return word[:-1]
     return word
 
@@ -111,6 +106,10 @@ def _extract_quantity(text):
 
 
 def _extract_modifiers(text):
+    """Treats fried/cheese/parcel words as toggles, stripping them from the
+    search text — good for "chicken burger extra cheese" (a plain burger,
+    add cheese). See _plain_name_words() for the other interpretation,
+    needed when those words are actually PART of a dish's name."""
     words = text.lower().split()
     is_fried = False
     has_cheese = False
@@ -147,6 +146,20 @@ def _extract_modifiers(text):
     return ' '.join(remaining), is_fried, has_cheese, is_parcel
 
 
+def _plain_name_words(text):
+    """The other interpretation: fried/cheese/parcel words are kept as part
+    of the dish name (no modifiers extracted) — only filler/negation words
+    are dropped. Needed for menu items whose real name includes them, like
+    "Chicken Cheese Momo" or "Fried Chicken Burger"."""
+    words = []
+    for word in text.lower().split():
+        clean = word.strip('.,')
+        if clean in FILLER_WORDS or clean in NEGATION_WORDS:
+            continue
+        words.append(_singularize(clean))
+    return ' '.join(words)
+
+
 def _best_menu_match(name_text, menu_items):
     name_text = name_text.lower().strip()
     if not name_text:
@@ -162,7 +175,14 @@ def _best_menu_match(name_text, menu_items):
         if item_name == name_text:
             return item, 1.0
 
-        overlap_score = len(input_words & item_words) / max(len(item_words), 1)
+        # Jaccard similarity — penalizes both a partial-coverage match (the
+        # item is missing words the customer said) AND an overly-broad one
+        # (the item has extra words the customer didn't say), so a more
+        # SPECIFIC matching item always beats a shorter/generic one that
+        # also happens to overlap (e.g. "Chicken peri peri momos" beats
+        # plain "Chicken momos" when the customer said "peri peri").
+        union_size = len(input_words | item_words) or 1
+        overlap_score = len(input_words & item_words) / union_size
         ratio_score = SequenceMatcher(None, name_text, item_name).ratio()
         score = max(overlap_score, ratio_score)
 
@@ -171,6 +191,24 @@ def _best_menu_match(name_text, menu_items):
             best_item = item
 
     return best_item, best_score
+
+
+def _parse_segment(segment, menu_items):
+    quantity, rest = _extract_quantity(segment)
+
+    # Candidate A: fried/cheese/parcel words are modifiers, stripped from
+    # the search text — for a plain item ordered with an add-on.
+    name_a, is_fried, has_cheese, is_parcel = _extract_modifiers(rest)
+    item_a, score_a = _best_menu_match(name_a, menu_items)
+
+    # Candidate B: those words are kept as part of the dish name — for a
+    # menu item that's genuinely called e.g. "Fried Chicken Burger".
+    name_b = _plain_name_words(rest)
+    item_b, score_b = _best_menu_match(name_b, menu_items)
+
+    if score_b >= score_a and item_b is not None:
+        return quantity, item_b, score_b, False, False, False
+    return quantity, item_a, score_a, is_fried, has_cheese, is_parcel
 
 
 def parse_order_text(text, menu_items):
@@ -191,11 +229,13 @@ def parse_order_text(text, menu_items):
         if segment.lower() in CANCEL_WORDS:
             continue
 
-        quantity, rest = _extract_quantity(segment)
-        name_text, is_fried, has_cheese, is_parcel = _extract_modifiers(rest)
-        if not name_text:
-            continue
-        menu_item, score = _best_menu_match(name_text, menu_items)
+        quantity, menu_item, score, is_fried, has_cheese, is_parcel = _parse_segment(segment, menu_items)
+        if menu_item is None and score == 0.0:
+            # Nothing recognizable at all in this segment (e.g. it was
+            # entirely filler words) — skip it rather than flag an empty line.
+            _, rest = _extract_quantity(segment)
+            if not _extract_modifiers(rest)[0] and not _plain_name_words(rest):
+                continue
 
         results.append({
             'raw': segment,
