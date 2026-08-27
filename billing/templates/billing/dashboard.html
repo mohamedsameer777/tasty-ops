@@ -162,6 +162,8 @@
       </form>
     </nav>
     <button id="refresh-btn" onclick="loadDashboard()">Refresh</button>
+    <button id="share-summary-btn" onclick="shareTodaysSummary()"
+      style="background:#25D366; color:#0f1720; border:none; font-weight:700; padding:8px 14px; border-radius:8px; cursor:pointer; font-size:13px;">Share today's summary</button>
     <button id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle dark/light theme"
       style="background:var(--panel); border:1px solid var(--panel-border); color:var(--text); padding:8px 12px; border-radius:8px; cursor:pointer; font-size:14px;">☀️</button>
   </div>
@@ -272,7 +274,13 @@
 
 </div>
 
+{{ shop.name|default:"Tasty Zone"|json_script:"shop-name-data" }}
+{{ shop.contact_phone|default:""|json_script:"shop-contact-phone-data" }}
+
 <script>
+const SHOP_NAME = JSON.parse(document.getElementById('shop-name-data').textContent);
+const SHOP_CONTACT_PHONE = JSON.parse(document.getElementById('shop-contact-phone-data').textContent);
+
 function initTheme() {
   const saved = localStorage.getItem('tasty-ops-theme') || 'dark';
   document.documentElement.dataset.theme = saved;
@@ -295,6 +303,37 @@ async function getJSON(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url} -> ${res.status}`);
   return res.json();
+}
+
+let latestTodaySummary = null;
+
+function shareTodaysSummary() {
+  if (!latestTodaySummary) {
+    alert('Still loading today\'s data — try again in a second.');
+    return;
+  }
+
+  let phone = (SHOP_CONTACT_PHONE || '').replace(/[^0-9]/g, '');
+  if (!phone) {
+    phone = (window.prompt('Send the summary to which number? (with country code, e.g. 919876543210):') || '').replace(/[^0-9]/g, '');
+    if (!phone) return;
+  }
+  if (phone.length === 10) phone = '91' + phone;
+
+  const s = latestTodaySummary;
+  const dateLabel = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  const text =
+    `*${SHOP_NAME} — Today's Summary*\n` +
+    `${dateLabel}\n\n` +
+    `Total Sales: ${fmtMoney(s.total_sales || 0)}\n` +
+    `Bills: ${s.bill_count ?? 0}\n\n` +
+    `Cash: ${fmtMoney(s.cash_total || 0)} (${s.cash_bill_count ?? 0} bills)\n` +
+    `GPay / UPI: ${fmtMoney(s.upi_total || 0)} (${s.upi_bill_count ?? 0} bills)\n` +
+    (Number(s.other_total || 0) > 0 ? `Other: ${fmtMoney(s.other_total)} (${s.other_bill_count ?? 0} bills)\n` : '');
+
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank');
 }
 
 function getCookie(name) {
@@ -331,6 +370,7 @@ async function loadDashboard() {
   try {
     const today = await getJSON('/api/bills/today/');
     const payload = today.results || today; // handles paginated or flat shape
+    latestTodaySummary = payload;
     document.getElementById('stat-sales').textContent = fmtMoney(payload.total_sales || 0);
     document.getElementById('stat-bill-count').textContent = payload.bill_count ?? 0;
     document.getElementById('stat-cash-total').textContent = fmtMoney(payload.cash_total || 0);

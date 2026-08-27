@@ -25,6 +25,10 @@ class Shop(models.Model):
     google_review_url = models.URLField(max_length=500, blank=True, help_text="Your shop's Google Maps review link — added to the WhatsApp bill message so customers can leave a review.")
     instagram_url = models.URLField(max_length=300, blank=True, help_text="Your shop's Instagram profile link — added to the WhatsApp bill message.")
     youtube_url = models.URLField(max_length=300, blank=True, help_text="Your shop's YouTube channel link — added to the WhatsApp bill message.")
+    daily_revenue_target = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Optional. A daily revenue goal — shown as a progress bar on the dashboard, with a streak counter for consecutive days hit.",
+    )
     is_active = models.BooleanField(default=True, help_text="Turn off to suspend a shop's access without deleting its data.")
     created_at = models.DateTimeField(auto_now_add=True)
 

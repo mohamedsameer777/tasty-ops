@@ -147,6 +147,10 @@ class ShopSettingsView(LoginRequiredMixin, View):
             if youtube_url is not None:
                 shop.youtube_url = youtube_url.strip()
 
+            daily_revenue_target = request.POST.get('daily_revenue_target')
+            if daily_revenue_target is not None:
+                shop.daily_revenue_target = daily_revenue_target.strip() or None
+
             shop.save()
         except Exception:
             logger.exception("shop-settings save failed for shop id=%s", shop.id)
@@ -162,6 +166,7 @@ class ShopSettingsView(LoginRequiredMixin, View):
             'google_review_url': shop.google_review_url,
             'instagram_url': shop.instagram_url,
             'youtube_url': shop.youtube_url,
+            'daily_revenue_target': str(shop.daily_revenue_target) if shop.daily_revenue_target is not None else None,
         })
 
 

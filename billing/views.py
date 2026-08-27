@@ -531,6 +531,47 @@ class BillViewSet(TenantScopedMixin, viewsets.ReadOnlyModelViewSet):
             'peak_hours': peak_hours,
         })
 
+    @action(detail=False, methods=['get'])
+    def daily_goal(self, request):
+        """
+        GET /api/bills/daily_goal/
+        Today's progress toward the shop's daily revenue target (set in
+        Shop Settings), plus a streak of consecutive days the target was
+        hit. Returns target=None if no target has been set yet.
+        """
+        shop = self.get_current_shop()
+        target = shop.daily_revenue_target
+        if target is None:
+            return Response({'target': None})
+
+        qs = self.get_queryset()
+        today = timezone.localdate()
+
+        def day_total(d):
+            return qs.filter(created_at__date=d).aggregate(total=Sum('total'))['total'] or Decimal('0.00')
+
+        todays_total = day_total(today)
+        hit_today = todays_total >= target
+
+        # Walk backward counting consecutive target-hit days, starting from
+        # today (if already hit) or yesterday otherwise.
+        streak = 0
+        check_date = today if hit_today else today - timedelta(days=1)
+        for _ in range(365):
+            if day_total(check_date) >= target:
+                streak += 1
+                check_date -= timedelta(days=1)
+            else:
+                break
+
+        return Response({
+            'target': str(target),
+            'today_total': str(todays_total),
+            'progress_pct': min(100, round(float(todays_total / target) * 100)) if target > 0 else 0,
+            'hit_today': hit_today,
+            'streak': streak,
+        })
+
     @action(detail=True, methods=['post'])
     def send_whatsapp(self, request, pk=None):
         """
