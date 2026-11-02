@@ -177,12 +177,14 @@ class OrderViewSet(TenantScopedMixin, viewsets.ModelViewSet):
     def voice_add(self, request, pk=None):
         """
         POST /api/orders/{id}/voice_add/
-        Body: {"text": "two chicken burgers extra cheese"}
-        Parses the text against this shop's active menu and adds whatever
-        it can confidently match. Anything it's unsure about comes back
-        in "needs_review" instead of being silently added wrong.
+        Body: {"text": "two chicken momo one veg momo fried 3 french fries"}
+        Parses the text against this shop's active menu and adds every line
+        it is sure about. Anything it is NOT sure about (no good match, or
+        two dishes that match equally well) is NOT added - it comes back in
+        "needs_review" together with its best candidate dishes, so the screen
+        can offer one-tap buttons instead of silently adding the wrong dish.
         """
-        from .voice_parsing import parse_order_text, MATCH_THRESHOLD
+        from .voice_parsing import parse_order_text
 
         order = self.get_object()
         if order.status != Order.Status.OPEN:
@@ -204,7 +206,7 @@ class OrderViewSet(TenantScopedMixin, viewsets.ModelViewSet):
         with transaction.atomic():
             for entry in parsed:
                 menu_item = entry['menu_item']
-                if menu_item is not None and entry['match_score'] >= MATCH_THRESHOLD:
+                if menu_item is not None and not entry['review_reason']:
                     is_fried = entry['is_fried'] and menu_item.supports_fried_option
                     has_extra_cheese = entry['has_extra_cheese'] and menu_item.supports_cheese_option
                     order_item, created = OrderItem.objects.get_or_create(
@@ -219,8 +221,23 @@ class OrderViewSet(TenantScopedMixin, viewsets.ModelViewSet):
                 else:
                     needs_review.append({
                         'raw': entry['raw'],
+                        'reason': entry['review_reason'],
+                        'quantity': entry['quantity'],
+                        'is_fried': entry['is_fried'],
+                        'has_extra_cheese': entry['has_extra_cheese'],
+                        'is_parcel': entry['is_parcel'],
                         'best_guess': menu_item.name if menu_item else None,
                         'match_score': entry['match_score'],
+                        'suggestions': [
+                            {
+                                'menu_item_id': s['menu_item_id'],
+                                'name': s['name'],
+                                # tell the screen whether the add-ons apply to this dish
+                                'supports_fried': next((m.supports_fried_option for m in menu_items if m.id == s['menu_item_id']), False),
+                                'supports_cheese': next((m.supports_cheese_option for m in menu_items if m.id == s['menu_item_id']), False),
+                            }
+                            for s in entry['suggestions']
+                        ],
                     })
 
         order = self.get_queryset().get(pk=order.pk)
@@ -474,17 +491,20 @@ class BillViewSet(TenantScopedMixin, viewsets.ReadOnlyModelViewSet):
         # Best-selling items, by revenue — join through Order to reach
         # OrderItem for bills in this window.
         order_ids = qs.values_list('order_id', flat=True)
+        # Ranked by UNITS SOLD (most-selling first). The annotation is called
+        # "units" because an alias equal to a model field name ("quantity")
+        # collides with F('quantity') in the same query.
         item_rows = (
             OrderItem.objects.filter(order_id__in=order_ids)
             .values('menu_item__name')
             .annotate(
-                quantity=Sum('quantity'),
+                units=Sum('quantity'),
                 revenue=Sum(F('unit_price') * F('quantity')),
             )
-            .order_by('-revenue')[:8]
+            .order_by('-units', '-revenue')[:10]
         )
         top_items = [
-            {'name': row['menu_item__name'], 'quantity': row['quantity'], 'revenue': str(row['revenue'] or Decimal('0.00'))}
+            {'name': row['menu_item__name'], 'quantity': row['units'], 'revenue': str(row['revenue'] or Decimal('0.00'))}
             for row in item_rows
         ]
 
@@ -530,6 +550,50 @@ class BillViewSet(TenantScopedMixin, viewsets.ReadOnlyModelViewSet):
             'category_breakdown': category_breakdown,
             'peak_hours': peak_hours,
         })
+
+    @action(detail=False, methods=['get'])
+    def dish_summary(self, request):
+        """
+        GET /api/bills/dish_summary/?period=today
+        GET /api/bills/dish_summary/?period=week          (Monday -> today)
+        GET /api/bills/dish_summary/?period=month         (1st -> today)
+        GET /api/bills/dish_summary/?start=2026-10-01&end=2026-10-15
+
+        How many of each dish was sold in the period, most-selling first -
+        only dishes that actually sold are listed. period can also be
+        yesterday, last_week, last_month, last_7, last_30. Demo data from
+        generate_synthetic_sales is excluded.
+        """
+        from .sales_summary import PERIOD_CHOICES, describe_range, dish_sales, period_range
+
+        start_param = request.query_params.get('start')
+        end_param = request.query_params.get('end')
+
+        if start_param or end_param:
+            try:
+                start = datetime.strptime(start_param or end_param, '%Y-%m-%d').date()
+                end = datetime.strptime(end_param or start_param, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({'detail': 'start and end must be in YYYY-MM-DD format.'}, status=status.HTTP_400_BAD_REQUEST)
+            if end < start:
+                return Response({'detail': 'end must not be before start.'}, status=status.HTTP_400_BAD_REQUEST)
+            if (end - start).days > 366:
+                return Response({'detail': 'Please ask for at most one year at a time.'}, status=status.HTTP_400_BAD_REQUEST)
+            period, label = 'custom', describe_range(start, end)
+        else:
+            period = request.query_params.get('period', 'today')
+            try:
+                start, end, label = period_range(period)
+            except ValueError:
+                return Response(
+                    {'detail': f"period must be one of: {', '.join(PERIOD_CHOICES)}."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        data = dish_sales(self.get_current_shop(), start, end)
+        data['period'] = period
+        data['label'] = label
+        return Response(data)
 
     @action(detail=False, methods=['get'])
     def daily_goal(self, request):

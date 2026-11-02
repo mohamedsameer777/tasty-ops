@@ -15,6 +15,26 @@ from django.utils.decorators import method_decorator
 from .forms import ShopSignupForm
 
 
+def normalize_phone(raw):
+    """
+    '98765 43210' / '+91 98765-43210' / '09876543210' -> '919876543210'.
+    Returns '' for an empty value (clears the number) and None when it
+    cannot be a real phone number. Digits only, country code included,
+    because that is the form wa.me links need.
+    """
+    raw = (raw or '').strip()
+    digits = ''.join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        return '' if not raw else None    # empty -> clear the number; letters only -> invalid
+    if len(digits) == 11 and digits.startswith('0'):
+        digits = digits[1:]
+    if len(digits) == 10:
+        digits = '91' + digits          # default country code: India
+    if not 11 <= len(digits) <= 15:
+        return None
+    return digits
+
+
 class SignupView(CreateView):
     """
     Self-serve shop signup — creates a new Shop + owner User + Membership
@@ -100,6 +120,7 @@ class ShopSettingsView(LoginRequiredMixin, View):
       - logo: an image file (optional)
       - latitude, longitude: decimal strings from navigator.geolocation (optional)
       - address: human-readable address string (optional, e.g. from reverse geocoding)
+      - contact_phone: the owner's WhatsApp number - summaries are sent here (optional; send empty to clear)
     Returns the updated shop as JSON.
     """
     def post(self, request):
@@ -112,7 +133,20 @@ class ShopSettingsView(LoginRequiredMixin, View):
         if shop is None:
             return JsonResponse({'detail': 'No shop found for this account.'}, status=400)
 
+        # Validate the phone number FIRST so a bad number never half-saves the other settings.
+        contact_phone = request.POST.get('contact_phone')
+        if contact_phone is not None:
+            cleaned_phone = normalize_phone(contact_phone)
+            if cleaned_phone is None:
+                return JsonResponse(
+                    {'detail': 'That phone number does not look right. Use 10 digits (e.g. 9876543210), or include the country code (919876543210).'},
+                    status=400,
+                )
+
         try:
+            if contact_phone is not None:
+                shop.contact_phone = cleaned_phone
+
             if 'logo' in request.FILES:
                 shop.logo = request.FILES['logo']
 
@@ -163,11 +197,59 @@ class ShopSettingsView(LoginRequiredMixin, View):
             'longitude': str(shop.longitude) if shop.longitude is not None else None,
             'address': shop.address,
             'upi_id': shop.upi_id,
+            'contact_phone': shop.contact_phone,
             'google_review_url': shop.google_review_url,
             'instagram_url': shop.instagram_url,
             'youtube_url': shop.youtube_url,
             'daily_revenue_target': str(shop.daily_revenue_target) if shop.daily_revenue_target is not None else None,
         })
+
+
+class RunPredictionsView(LoginRequiredMixin, View):
+    """
+    POST /run-predictions/
+    "Run the predictions now" for the logged-in shop, without waiting for the
+    nightly job: re-forecasts tomorrow's demand for every dish from the real
+    sales history, then back-fills actual sales for past forecasts.
+
+    Deliberately does NOT run the reorder agent - that one messages suppliers
+    on WhatsApp when stock is critical, and that should only happen from the
+    nightly job, not from a button press.
+    """
+    def post(self, request):
+        from collections import Counter
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from .anomaly_agent import run_anomaly_agent
+        from .forecasting import run_forecast_for_all_items
+        from .tenancy import get_shop_for_user
+
+        logger = logging.getLogger(__name__)
+        shop = get_shop_for_user(request.user)
+        if shop is None:
+            return JsonResponse({'detail': 'No shop found for this account.'}, status=400)
+
+        forecast_date = timezone.localdate() + timedelta(days=1)
+        try:
+            summary = run_forecast_for_all_items(shop, forecast_date)
+        except Exception:
+            logger.exception("Manual forecast failed for shop %s", shop.slug)
+            return JsonResponse({'detail': 'Forecast failed. Check the server logs.'}, status=500)
+
+        result = {
+            'forecast_date': forecast_date.isoformat(),
+            'items_forecast': len(summary),
+            'models_used': dict(Counter(row['model_kind'] for row in summary)),
+            'trading_days_of_data': max((row['trading_days_used'] for row in summary), default=0),
+        }
+        try:
+            result['anomaly_check'] = run_anomaly_agent(shop)
+        except Exception:
+            logger.exception("Manual anomaly check failed for shop %s", shop.slug)
+            result['anomaly_check'] = None
+        return JsonResponse(result)
 
 
 @method_decorator(csrf_exempt, name='dispatch')

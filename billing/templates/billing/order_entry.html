@@ -185,6 +185,11 @@
         style="width:100%; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; padding:7px 8px; color:var(--text); font-size:13px;">
     </div>
     <div style="margin-bottom:14px;">
+      <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">Your WhatsApp number (daily / weekly / monthly summaries are sent here)</label>
+      <input type="tel" id="shop-contact-phone-input" value="{{ shop.contact_phone|default:'' }}" placeholder="e.g. 9876543210 (country code optional)"
+        inputmode="tel" style="width:100%; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; padding:7px 8px; color:var(--text); font-size:13px;">
+    </div>
+    <div style="margin-bottom:14px;">
       <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">Google review link (added to WhatsApp bills)</label>
       <input type="text" id="shop-google-review-input" value="{{ shop.google_review_url|default:'' }}" placeholder="Your Google Maps review link"
         style="width:100%; background:var(--bg); border:1px solid var(--panel-border); border-radius:6px; padding:7px 8px; color:var(--text); font-size:13px;">
@@ -1080,6 +1085,7 @@ async function saveShopSettings() {
     formData.append('logo', logoInput.files[0]);
   }
   formData.append('upi_id', document.getElementById('shop-upi-id-input').value.trim());
+  formData.append('contact_phone', document.getElementById('shop-contact-phone-input').value.trim());
   formData.append('google_review_url', document.getElementById('shop-google-review-input').value.trim());
   formData.append('instagram_url', document.getElementById('shop-instagram-input').value.trim());
   formData.append('youtube_url', document.getElementById('shop-youtube-input').value.trim());
@@ -1095,13 +1101,14 @@ async function saveShopSettings() {
       headers: { 'X-CSRFToken': getCookie('csrftoken') },
       body: formData,
     });
-    if (!res.ok) throw new Error('Save failed (' + res.status + ')');
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('Save failed (' + res.status + ')'));
     if (data.logo_url) {
       document.getElementById('shop-logo-img').src = data.logo_url;
       document.getElementById('shop-settings-logo-preview').src = data.logo_url;
     }
     SHOP_UPI_ID = data.upi_id || '';
+    if (data.contact_phone !== undefined) document.getElementById('shop-contact-phone-input').value = data.contact_phone;
     SHOP_GOOGLE_REVIEW_URL = data.google_review_url || '';
     SHOP_INSTAGRAM_URL = data.instagram_url || '';
     SHOP_YOUTUBE_URL = data.youtube_url || '';
@@ -1113,61 +1120,203 @@ async function saveShopSettings() {
 }
 
 
+// ---------------------------------------------------------------------------
+// Voice ordering
+//
+// Keeps listening until you stop talking (or tap the button again), then sends
+// EVERYTHING you said in one go - so "two chicken momo, one veg momo, three
+// fries" adds all three. Dishes the server is unsure about are not added
+// blindly: they show up as one-tap choices.
+// ---------------------------------------------------------------------------
 let voiceRecognition = null;
 let voiceListening = false;
+let voiceTranscript = '';
+let voiceSent = false;
+let voiceHadError = false;
+let voiceSilenceTimer = null;
+const VOICE_SILENCE_MS = 2200;   // stop automatically after this much silence
 
 function getVoiceRecognitionClass() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
 
+function voiceStatusBox() {
+  const el = document.getElementById('voice-order-status');
+  el.style.display = 'block';
+  return el;
+}
+
+function setVoiceStatus(text) {
+  const el = voiceStatusBox();
+  el.replaceChildren(document.createTextNode(text));
+}
+
+function stopVoice() {
+  clearTimeout(voiceSilenceTimer);
+  if (voiceRecognition) {
+    try { voiceRecognition.stop(); } catch (e) { /* already stopped */ }
+  }
+}
+
 function toggleVoiceOrder() {
   const RecognitionClass = getVoiceRecognitionClass();
-  const statusEl = document.getElementById('voice-order-status');
   const btn = document.getElementById('voice-order-btn');
 
   if (!RecognitionClass) {
-    statusEl.style.display = 'block';
-    statusEl.textContent = 'Voice ordering needs Chrome (desktop or Android) — not supported in this browser.';
+    setVoiceStatus('Voice ordering needs Chrome (desktop or Android) — not supported in this browser.');
     return;
   }
 
+  // Tapping again while listening = "I'm done talking".
   if (voiceListening) {
-    voiceRecognition.stop();
+    stopVoice();
     return;
   }
 
-  voiceRecognition = new RecognitionClass();
-  voiceRecognition.lang = 'en-IN';
-  voiceRecognition.interimResults = false;
-  voiceRecognition.maxAlternatives = 1;
+  voiceTranscript = '';
+  voiceSent = false;
+  voiceHadError = false;
 
-  voiceRecognition.onstart = () => {
+  const rec = new RecognitionClass();
+  voiceRecognition = rec;
+  rec.lang = 'en-IN';
+  rec.continuous = true;        // don't stop at the first pause
+  rec.interimResults = true;    // show words as they are heard
+  rec.maxAlternatives = 1;
+
+  rec.onstart = () => {
     voiceListening = true;
-    btn.textContent = '🎤 Listening…';
-    statusEl.style.display = 'block';
-    statusEl.textContent = 'Listening — say something like "two chicken burgers extra cheese".';
+    btn.textContent = '🎤 Listening… (tap when done)';
+    setVoiceStatus('Listening — say everything, e.g. "two chicken momo, one veg momo fried, three french fries".');
   };
 
-  voiceRecognition.onerror = (event) => {
-    statusEl.textContent = 'Voice error: ' + event.error;
+  rec.onresult = (event) => {
+    // Rebuild the transcript from ALL results every time (never append by
+    // index) - some Android versions re-send earlier results, which would
+    // otherwise be counted twice.
+    const finals = [];
+    let interim = '';
+    for (let i = 0; i < event.results.length; i++) {
+      const r = event.results[i];
+      const t = (r[0].transcript || '').trim();
+      if (!t) continue;
+      if (r.isFinal) {
+        const prev = finals[finals.length - 1];
+        if (prev && t.toLowerCase().startsWith(prev.toLowerCase())) {
+          finals[finals.length - 1] = t;     // cumulative repeat: keep the longer one
+        } else {
+          finals.push(t);
+        }
+      } else {
+        interim += ' ' + t;
+      }
+    }
+    voiceTranscript = (finals.join(' ') + ' ' + interim).trim();
+    setVoiceStatus(`Hearing: "${voiceTranscript}"`);
+
+    clearTimeout(voiceSilenceTimer);
+    voiceSilenceTimer = setTimeout(stopVoice, VOICE_SILENCE_MS);
   };
 
-  voiceRecognition.onend = () => {
+  rec.onerror = (event) => {
+    voiceHadError = true;
+    if (event.error === 'no-speech') {
+      setVoiceStatus('Didn\'t hear anything — tap 🎤 and try again.');
+    } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      setVoiceStatus('Microphone permission is blocked — allow the mic for this site in your browser settings.');
+    } else if (event.error !== 'aborted') {
+      setVoiceStatus('Voice error: ' + event.error);
+    }
+  };
+
+  rec.onend = () => {
+    clearTimeout(voiceSilenceTimer);
     voiceListening = false;
     btn.textContent = '🎤 Voice add';
+    if (voiceTranscript && !voiceSent) {
+      voiceSent = true;
+      setVoiceStatus(`Heard: "${voiceTranscript}" — adding…`);
+      sendVoiceOrderText(voiceTranscript);
+    } else if (!voiceTranscript && !voiceHadError) {
+      setVoiceStatus('Didn\'t hear anything — tap 🎤 and try again.');
+    }
   };
 
-  voiceRecognition.onresult = async (event) => {
-    const text = event.results[0][0].transcript;
-    statusEl.textContent = `Heard: "${text}" — adding…`;
-    await sendVoiceOrderText(text);
-  };
+  try {
+    rec.start();
+  } catch (e) {
+    setVoiceStatus('Could not start the microphone: ' + e.message);
+  }
+}
 
-  voiceRecognition.start();
+function voiceLine(parent, text) {
+  const div = document.createElement('div');
+  div.style.marginBottom = '6px';
+  div.textContent = text;
+  parent.appendChild(div);
+  return div;
+}
+
+async function addVoiceSuggestion(review, suggestion, rowEl) {
+  try {
+    const order = await api(`/api/orders/${activeOrderId}/add_items/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        menu_item: suggestion.menu_item_id,
+        quantity: review.quantity,
+        is_parcel: !!review.is_parcel,
+        is_fried: !!review.is_fried && !!suggestion.supports_fried,
+        has_extra_cheese: !!review.has_extra_cheese && !!suggestion.supports_cheese,
+      }),
+    });
+    openOrders[activeOrderId] = order;
+    renderOrdersList();
+    rowEl.replaceChildren(document.createTextNode(`Added: ${review.quantity}x ${suggestion.name}`));
+  } catch (e) {
+    rowEl.replaceChildren(document.createTextNode(e.message));
+  }
+}
+
+function renderVoiceResult(result, heardText) {
+  const box = voiceStatusBox();
+  box.replaceChildren();
+  voiceLine(box, `Heard: "${heardText}"`).style.color = 'var(--muted)';
+
+  if (result.added.length) {
+    const names = result.added.map(a => `${a.quantity}x ${a.menu_item}`).join(', ');
+    const line = voiceLine(box, `Added: ${names}`);
+    line.style.color = 'var(--green)';
+  }
+
+  result.needs_review.forEach((review) => {
+    if (review.suggestions && review.suggestions.length) {
+      const row = document.createElement('div');
+      row.style.cssText = 'margin:8px 0; padding:8px; border:1px solid var(--panel-border); border-radius:8px;';
+      const label = document.createElement('div');
+      label.style.marginBottom = '6px';
+      label.textContent = `Not sure which one you meant by "${review.raw}" — tap the right dish:`;
+      row.appendChild(label);
+      review.suggestions.forEach((sug) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'secondary';
+        b.style.cssText = 'margin:0 6px 6px 0; width:auto; padding:6px 10px; font-size:12px;';
+        b.textContent = `${review.quantity}x ${sug.name}`;
+        b.onclick = () => addVoiceSuggestion(review, sug, row);
+        row.appendChild(b);
+      });
+      box.appendChild(row);
+    } else {
+      voiceLine(box, `Couldn't match "${review.raw}" to any menu item — tap it on the menu instead.`).style.color = 'var(--amber)';
+    }
+  });
+
+  if (!result.added.length && !result.needs_review.length) {
+    voiceLine(box, 'Didn\'t catch an item in that — try again.');
+  }
 }
 
 async function sendVoiceOrderText(text) {
-  const statusEl = document.getElementById('voice-order-status');
   if (!activeOrderId) {
     await startNewOrder();
   }
@@ -1179,21 +1328,9 @@ async function sendVoiceOrderText(text) {
     });
     openOrders[activeOrderId] = result.order;
     renderOrdersList();
-
-    const addedNames = result.added.map(a => `${a.quantity}x ${a.menu_item}`).join(', ');
-    if (result.added.length && !result.needs_review.length) {
-      statusEl.textContent = `Added: ${addedNames}`;
-    } else if (result.added.length && result.needs_review.length) {
-      const unclear = result.needs_review.map(r => `"${r.raw}"`).join(', ');
-      statusEl.textContent = `Added: ${addedNames}. Couldn't confidently match: ${unclear} — add manually from the menu.`;
-    } else if (result.needs_review.length) {
-      const unclear = result.needs_review.map(r => `"${r.raw}"`).join(', ');
-      statusEl.textContent = `Didn't recognize any menu item in: ${unclear} — try again or tap it on the menu.`;
-    } else {
-      statusEl.textContent = 'Didn\'t catch an item in that — try again.';
-    }
+    renderVoiceResult(result, text);
   } catch (e) {
-    statusEl.textContent = e.message;
+    setVoiceStatus(e.message);
   }
 }
 

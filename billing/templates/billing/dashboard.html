@@ -138,6 +138,13 @@
   }
 
   .badge.unit { color: var(--muted); font-weight: 400; text-transform: none; }
+
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+  .tab-btn { background: var(--bg); border: 1px solid var(--panel-border); color: var(--muted); padding: 6px 14px; border-radius: 999px; cursor: pointer; font-size: 13px; }
+  .tab-btn.active { background: var(--accent); border-color: var(--accent); color: #0f1720; font-weight: 700; }
+  .dish-bar { height: 5px; border-radius: 3px; background: var(--accent); margin-top: 4px; opacity: .85; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  .share-wa { background:#25D366; color:#0f1720; border:none; font-weight:700; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:12.5px; margin-left:auto; }
 </style>
 </head>
 <body>
@@ -164,6 +171,8 @@
     <button id="refresh-btn" onclick="loadDashboard()">Refresh</button>
     <button id="share-summary-btn" onclick="shareTodaysSummary()"
       style="background:#25D366; color:#0f1720; border:none; font-weight:700; padding:8px 14px; border-radius:8px; cursor:pointer; font-size:13px;">Share today's summary</button>
+    <button onclick="changeSummaryPhone()" title="Change the WhatsApp number summaries are sent to"
+      style="background:var(--panel); border:1px solid var(--panel-border); color:var(--text); padding:8px 12px; border-radius:8px; cursor:pointer; font-size:14px;">📞</button>
     <button id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle dark/light theme"
       style="background:var(--panel); border:1px solid var(--panel-border); color:var(--text); padding:8px 12px; border-radius:8px; cursor:pointer; font-size:14px;">☀️</button>
   </div>
@@ -237,12 +246,33 @@
     </div>
   </div>
 
+  <div class="panel" id="dish-sales-panel">
+    <h2>Dishes Sold</h2>
+    <div class="tabs">
+      <button class="tab-btn active" data-period="today" onclick="showDishTab('today')">Today</button>
+      <button class="tab-btn" data-period="week" onclick="showDishTab('week')">This Week</button>
+      <button class="tab-btn" data-period="month" onclick="showDishTab('month')">This Month</button>
+      <button class="share-wa" onclick="shareDishSummary()">Share on WhatsApp</button>
+    </div>
+    <div id="dish-range" style="color:var(--muted); font-size:13px; margin-bottom:10px;"></div>
+    <table id="dish-table">
+      <thead><tr><th>#</th><th>Dish (most selling first)</th><th class="num">Sold</th><th class="num">Revenue</th></tr></thead>
+      <tbody></tbody>
+      <tfoot></tfoot>
+    </table>
+    <div class="empty" id="dish-empty" style="display:none;">No dishes sold in this period yet.</div>
+  </div>
+
   <div class="panels">
     <div>
       <div class="panel">
         <h2>Tomorrow's Forecast</h2>
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap;">
+          <button id="run-predictions-btn" class="tab-btn" onclick="runPredictions()">Run predictions now</button>
+          <span id="run-predictions-status" style="color:var(--muted); font-size:12.5px;"></span>
+        </div>
         <table id="forecast-table">
-          <thead><tr><th>Menu Item</th><th>Predicted Qty</th></tr></thead>
+          <thead><tr><th>Menu Item</th><th class="num">Predicted Qty</th><th>Based on</th></tr></thead>
           <tbody></tbody>
         </table>
         <div class="empty" id="forecast-empty" style="display:none;">No forecast run yet for tomorrow.</div>
@@ -279,7 +309,7 @@
 
 <script>
 const SHOP_NAME = JSON.parse(document.getElementById('shop-name-data').textContent);
-const SHOP_CONTACT_PHONE = JSON.parse(document.getElementById('shop-contact-phone-data').textContent);
+let SHOP_CONTACT_PHONE = JSON.parse(document.getElementById('shop-contact-phone-data').textContent);
 
 function initTheme() {
   const saved = localStorage.getItem('tasty-ops-theme') || 'dark';
@@ -307,19 +337,62 @@ async function getJSON(url) {
 
 let latestTodaySummary = null;
 
+// ---- WhatsApp summaries ---------------------------------------------------
+
+function normalizePhone(raw) {
+  let d = String(raw || '').replace(/[^0-9]/g, '');
+  if (d.length === 11 && d.startsWith('0')) d = d.slice(1);
+  if (d.length === 10) d = '91' + d;
+  return (d.length >= 11 && d.length <= 15) ? d : '';
+}
+
+async function saveContactPhone(phone) {
+  const fd = new FormData();
+  fd.append('contact_phone', phone);
+  try {
+    await fetch('/shop-settings/', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'X-CSRFToken': getCookie('csrftoken') }, body: fd,
+    });
+  } catch (e) { /* not fatal - the summary still opens */ }
+}
+
+function changeSummaryPhone() {
+  const entered = window.prompt('WhatsApp number to send summaries to (e.g. 9876543210):', SHOP_CONTACT_PHONE || '');
+  if (entered === null) return;
+  const phone = normalizePhone(entered);
+  if (!phone) { alert('That does not look like a valid phone number.'); return; }
+  SHOP_CONTACT_PHONE = phone;
+  saveContactPhone(phone);
+  alert('Saved. Summaries will open WhatsApp on ' + phone + '.');
+}
+
+// Opens WhatsApp straight to the saved number with the text filled in.
+// (window.open must happen right inside the click, so the number is saved in the background.)
+function sendToWhatsApp(text) {
+  let phone = normalizePhone(SHOP_CONTACT_PHONE);
+  if (!phone) {
+    phone = normalizePhone(window.prompt('Which WhatsApp number should summaries go to? (e.g. 9876543210)\nIt will be saved, so next time this opens WhatsApp directly.'));
+    if (!phone) return;
+    SHOP_CONTACT_PHONE = phone;
+    saveContactPhone(phone);
+  }
+  window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
+}
+
+function dishLines(summary) {
+  const items = (summary && summary.items) || [];
+  if (!items.length) return '_No dishes sold._\n';
+  return items.map(i => `• ${i.name} — ${i.quantity}`).join('\n') + '\n' +
+    `\nTotal dishes sold: ${summary.total_units}\n` +
+    (summary.top_seller ? `Top seller: ${summary.top_seller.name} (${summary.top_seller.quantity})\n` : '');
+}
+
 function shareTodaysSummary() {
   if (!latestTodaySummary) {
     alert('Still loading today\'s data — try again in a second.');
     return;
   }
-
-  let phone = (SHOP_CONTACT_PHONE || '').replace(/[^0-9]/g, '');
-  if (!phone) {
-    phone = (window.prompt('Send the summary to which number? (with country code, e.g. 919876543210):') || '').replace(/[^0-9]/g, '');
-    if (!phone) return;
-  }
-  if (phone.length === 10) phone = '91' + phone;
-
   const s = latestTodaySummary;
   const dateLabel = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
@@ -330,10 +403,139 @@ function shareTodaysSummary() {
     `Bills: ${s.bill_count ?? 0}\n\n` +
     `Cash: ${fmtMoney(s.cash_total || 0)} (${s.cash_bill_count ?? 0} bills)\n` +
     `GPay / UPI: ${fmtMoney(s.upi_total || 0)} (${s.upi_bill_count ?? 0} bills)\n` +
-    (Number(s.other_total || 0) > 0 ? `Other: ${fmtMoney(s.other_total)} (${s.other_bill_count ?? 0} bills)\n` : '');
+    (Number(s.other_total || 0) > 0 ? `Other: ${fmtMoney(s.other_total)} (${s.other_bill_count ?? 0} bills)\n` : '') +
+    `\n*Dishes sold*\n` + dishLines(dishSummaries.today);
+  sendToWhatsApp(text);
+}
 
-  const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
-  window.open(url, '_blank');
+// ---- Dishes sold: today / week / month -----------------------------------
+
+const dishSummaries = {};     // period -> API response
+let revenueSummary = null;    // from /api/bills/revenue_summary/
+let activeDishTab = 'today';
+const REVENUE_KEY = { today: 'today', week: 'this_week', month: 'this_month' };
+const TAB_TITLE = { today: "Today's Summary", week: 'Weekly Summary', month: 'Monthly Summary' };
+
+function showDishTab(period) {
+  activeDishTab = period;
+  document.querySelectorAll('#dish-sales-panel .tab-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.period === period));
+  renderDishTable();
+}
+
+function renderDishTable() {
+  const data = dishSummaries[activeDishTab];
+  const tbody = document.querySelector('#dish-table tbody');
+  const tfoot = document.querySelector('#dish-table tfoot');
+  tbody.innerHTML = '';
+  tfoot.innerHTML = '';
+  const empty = document.getElementById('dish-empty');
+  const range = document.getElementById('dish-range');
+
+  if (!data) { range.textContent = 'Loading…'; empty.style.display = 'none'; return; }
+  range.textContent = `${data.label} · ${data.range_text}` +
+    (data.days_in_period > 1 ? ` · about ${data.avg_units_per_day} dishes a day` : '');
+
+  if (!data.items.length) { empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+
+  const medals = ['🥇', '🥈', '🥉'];
+  const top = data.items[0].quantity || 1;
+  data.items.forEach(item => {
+    const tr = document.createElement('tr');
+
+    const rank = document.createElement('td');
+    rank.textContent = medals[item.rank - 1] || item.rank;
+
+    const name = document.createElement('td');
+    name.textContent = item.name;
+    const bar = document.createElement('div');
+    bar.className = 'dish-bar';
+    bar.style.width = Math.max(3, Math.round(item.quantity / top * 100)) + '%';
+    name.appendChild(bar);
+
+    const qty = document.createElement('td');
+    qty.className = 'num';
+    qty.style.fontWeight = '700';
+    qty.textContent = item.quantity;
+
+    const rev = document.createElement('td');
+    rev.className = 'num';
+    rev.style.color = 'var(--muted)';
+    rev.textContent = fmtMoney(item.revenue);
+
+    tr.append(rank, name, qty, rev);
+    tbody.appendChild(tr);
+  });
+
+  const total = document.createElement('tr');
+  total.innerHTML = '<td></td><td style="font-weight:700;">Total</td>';
+  const tq = document.createElement('td'); tq.className = 'num'; tq.style.fontWeight = '700'; tq.textContent = data.total_units;
+  const tr2 = document.createElement('td'); tr2.className = 'num'; tr2.style.fontWeight = '700'; tr2.textContent = fmtMoney(data.total_revenue);
+  total.append(tq, tr2);
+  tfoot.appendChild(total);
+}
+
+function shareDishSummary() {
+  const period = activeDishTab;
+  if (period === 'today') { shareTodaysSummary(); return; }
+  const data = dishSummaries[period];
+  if (!data) { alert('Still loading — try again in a second.'); return; }
+  const rev = revenueSummary && revenueSummary[REVENUE_KEY[period]];
+
+  const text =
+    `*${SHOP_NAME} — ${TAB_TITLE[period]}*\n` +
+    `${data.range_text}\n\n` +
+    (rev ? `Total Sales: ${fmtMoney(rev.total)}\nBills: ${rev.bill_count}\n\n` : '') +
+    `*Dishes sold*\n` + dishLines(data);
+  sendToWhatsApp(text);
+}
+
+async function loadDishSummaries() {
+  await Promise.all(['today', 'week', 'month'].map(async (period) => {
+    try {
+      dishSummaries[period] = await getJSON(`/api/bills/dish_summary/?period=${period}`);
+    } catch (e) {
+      dishSummaries[period] = { label: period, range_text: 'could not load', items: [], total_units: 0, total_revenue: 0, days_in_period: 1, top_seller: null };
+    }
+  }));
+  renderDishTable();
+}
+
+// ---- Predictions ------------------------------------------------------------
+
+const MODEL_LABELS = {
+  'xgb-blend': 'ML model + recent sales',
+  'weekday-weighted-average': 'Recent sales (same weekday)',
+  'weighted-average': 'Recent sales average',
+  'no-history-fallback': 'No sales yet',
+};
+
+function modelLabel(tag) {
+  const t = tag || '';
+  const key = Object.keys(MODEL_LABELS).find(k => t.startsWith(k));
+  return key ? MODEL_LABELS[key] : (t || '—');
+}
+
+async function runPredictions() {
+  const btn = document.getElementById('run-predictions-btn');
+  const status = document.getElementById('run-predictions-status');
+  btn.disabled = true;
+  status.textContent = 'Running on your real sales data…';
+  try {
+    const res = await fetch('/run-predictions/', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'X-CSRFToken': getCookie('csrftoken') },
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || `Failed (${res.status})`);
+    status.textContent = `Done — ${body.items_forecast} dishes forecast for ${body.forecast_date} from ${body.trading_days_of_data} trading days of data.`;
+    await loadDashboard();
+  } catch (e) {
+    status.textContent = 'Could not run predictions: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function getCookie(name) {
@@ -366,6 +568,7 @@ function fmtMoney(n) {
 }
 
 async function loadDashboard() {
+  loadDishSummaries();
   // Today's sales
   try {
     const today = await getJSON('/api/bills/today/');
@@ -384,6 +587,7 @@ async function loadDashboard() {
   // Revenue report — today / week / month / year / all-time
   try {
     const rev = await getJSON('/api/bills/revenue_summary/');
+    revenueSummary = rev;
     const periods = { today: 'rev-today', this_week: 'rev-week', this_month: 'rev-month', this_year: 'rev-year', all_time: 'rev-all-time' };
     for (const [key, elPrefix] of Object.entries(periods)) {
       const data = rev[key] || { total: 0, bill_count: 0 };
@@ -430,9 +634,12 @@ async function loadDashboard() {
       document.getElementById('forecast-empty').style.display = 'block';
     } else {
       document.getElementById('forecast-empty').style.display = 'none';
-      rows.forEach(f => {
+      rows.slice().sort((a, b) => Number(b.predicted_quantity) - Number(a.predicted_quantity)).forEach(f => {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${f.menu_item_name}</td><td>${f.predicted_quantity}</td>`;
+        const tdName = document.createElement('td'); tdName.textContent = f.menu_item_name;
+        const tdQty = document.createElement('td'); tdQty.className = 'num'; tdQty.style.fontWeight = '700'; tdQty.textContent = Number(f.predicted_quantity).toFixed(1);
+        const tdModel = document.createElement('td'); tdModel.style.cssText = 'color:var(--muted); font-size:12px;'; tdModel.textContent = modelLabel(f.model_version);
+        tr.append(tdName, tdQty, tdModel);
         tbody.appendChild(tr);
       });
     }

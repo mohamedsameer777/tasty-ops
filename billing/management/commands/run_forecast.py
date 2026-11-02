@@ -16,6 +16,10 @@ class Command(BaseCommand):
             '--date', type=str, default=None,
             help="Forecast date as YYYY-MM-DD. Defaults to tomorrow.",
         )
+        parser.add_argument(
+            '--include-synthetic', action='store_true',
+            help="Also learn from demo data made by generate_synthetic_sales. Off by default - forecasts use real sales only.",
+        )
 
     def handle(self, *args, **options):
         shop = resolve_shop(options)
@@ -24,7 +28,7 @@ class Command(BaseCommand):
             forecast_date = date.fromisoformat(options['date'])
 
         self.stdout.write(f"Running forecast for {shop.name} on {forecast_date.isoformat()}...")
-        summary = run_forecast_for_all_items(shop, forecast_date)
+        summary = run_forecast_for_all_items(shop, forecast_date, include_synthetic=options['include_synthetic'])
 
         if not summary:
             self.stdout.write(self.style.WARNING("No active menu items to forecast."))
@@ -33,6 +37,6 @@ class Command(BaseCommand):
         for row in summary:
             self.stdout.write(
                 f"  {row['menu_item']:30s} predicted={row['predicted_quantity']:>6} "
-                f"(model: {row['model_version']})"
+                f"(model: {row['model_kind']}, {row['trading_days_used']} trading days of data)"
             )
         self.stdout.write(self.style.SUCCESS(f"Stored {len(summary)} forecast(s) for {forecast_date.isoformat()}."))

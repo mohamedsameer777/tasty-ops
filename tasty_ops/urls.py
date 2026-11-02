@@ -21,7 +21,7 @@ from django.views.static import serve
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from billing.dashboard_views import (
-    AnalyticsView, BootstrapAdminView, DashboardView, HistoryView, OrderEntryView, RunDailyJobsView, ServiceWorkerView, ShopSettingsView, SignupView,
+    AnalyticsView, BootstrapAdminView, DashboardView, HistoryView, OrderEntryView, RunDailyJobsView, RunPredictionsView, ServiceWorkerView, ShopSettingsView, SignupView,
 )
 
 urlpatterns = [
@@ -38,6 +38,7 @@ urlpatterns = [
     path('shop-settings/', ShopSettingsView.as_view(), name='shop-settings'),
     path('sw.js', ServiceWorkerView.as_view(), name='service-worker'),
     path('run-daily-jobs/', RunDailyJobsView.as_view(), name='run-daily-jobs'),
+    path('run-predictions/', RunPredictionsView.as_view(), name='run-predictions'),
     path('bootstrap-admin/', BootstrapAdminView.as_view(), name='bootstrap-admin'),
     # Serves uploaded photos (menu items, shop logo) at all times, not just
     # in DEBUG. Django's own static() helper refuses to do this when

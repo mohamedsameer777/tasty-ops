@@ -17,6 +17,7 @@ from django.db.models import Sum
 from django.db.models.functions import TruncDate
 
 from .models import DemandAnomaly, DemandForecast, MenuItem, OrderItem, WeeklySummaryReport
+from .sales_summary import dish_sales, real_order_items
 
 # Variance beyond this % (in either direction) gets flagged as an anomaly
 # rather than normal day-to-day noise.
@@ -27,8 +28,8 @@ WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturd
 
 def _actual_quantity_sold(menu_item: MenuItem, on_date: date) -> Decimal:
     row = (
-        OrderItem.objects
-        .filter(menu_item=menu_item, order__bill__isnull=False)
+        real_order_items(menu_item.shop)
+        .filter(menu_item=menu_item)
         .annotate(sale_date=TruncDate('order__bill__created_at'))
         .filter(sale_date=on_date)
         .aggregate(total=Sum('quantity'))
@@ -97,6 +98,36 @@ def detect_anomalies(shop, as_of: date | None = None) -> list[DemandAnomaly]:
     return results
 
 
+def _sales_section(shop, week_start: date, week_end: date) -> list[str]:
+    """Plain-English 'what sold' block for the weekly report: top sellers, and dishes that did not sell at all."""
+    sales = dish_sales(shop, week_start, week_end)
+    lines = [f"SALES  ({sales['range_text']})"]
+
+    if not sales['items']:
+        lines.append("No sales were recorded in this period.")
+        return lines
+
+    lines.append(
+        f"{sales['total_units']} dishes sold (about {sales['avg_units_per_day']} a day), "
+        f"worth \u20b9{float(sales['total_revenue']):,.0f}."
+    )
+    lines.append("")
+    lines.append("Most-selling dishes:")
+    for item in sales['items'][:5]:
+        lines.append(f"  {item['rank']}. {item['name']} - {item['quantity']} sold")
+
+    sold_ids = [i['menu_item_id'] for i in sales['items']]
+    unsold = list(
+        MenuItem.objects.filter(shop=shop, is_active=True)
+        .exclude(id__in=sold_ids).order_by('name').values_list('name', flat=True)
+    )
+    if unsold:
+        shown = ", ".join(unsold[:8]) + (f" and {len(unsold) - 8} more" if len(unsold) > 8 else "")
+        lines.append("")
+        lines.append(f"Did not sell at all: {shown}")
+    return lines
+
+
 def generate_weekly_summary(shop, week_start: date | None = None) -> WeeklySummaryReport:
     """
     Looks at the last 7 days of anomalies for ONE shop and writes a
@@ -111,11 +142,17 @@ def generate_weekly_summary(shop, week_start: date | None = None) -> WeeklySumma
         shop=shop, forecast_date__gte=week_start, forecast_date__lte=week_end,
     ).select_related('menu_item')
 
+    sales_lines = _sales_section(shop, week_start, week_end)
+
     if not anomalies.exists():
-        summary_text = (
-            f"No forecast/actual data available for {week_start} to {week_end} yet — "
-            f"nothing to summarize this week."
-        )
+        summary_text = "\n".join([
+            f"Weekly report: {week_start} to {week_end}",
+            "",
+            *sales_lines,
+            "",
+            "FORECAST ACCURACY",
+            "No forecast-vs-actual data for this week yet - it fills in once the nightly forecast has run for a few days.",
+        ])
         return WeeklySummaryReport.objects.create(
             shop=shop, week_start=week_start, week_end=week_end, summary_text=summary_text,
         )
@@ -126,7 +163,11 @@ def generate_weekly_summary(shop, week_start: date | None = None) -> WeeklySumma
     normal = total - over - under
 
     lines = [
-        f"Weekly forecast accuracy report: {week_start} to {week_end}",
+        f"Weekly report: {week_start} to {week_end}",
+        "",
+        *sales_lines,
+        "",
+        "FORECAST ACCURACY",
         f"{total} item-days evaluated — {normal} normal, {over} over-forecast (wastage risk), "
         f"{under} under-forecast (lost sales risk).",
         "",
