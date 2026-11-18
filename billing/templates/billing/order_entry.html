@@ -298,8 +298,6 @@
     <div id="order-panel" class="panel">
       <h2>Orders</h2>
       <button class="secondary" style="margin-top:0; margin-bottom:14px; border-color:var(--accent); color:var(--accent); width:auto; padding:8px 16px;" onclick="startNewOrder()">+ New Order</button>
-      <button id="voice-order-btn" class="secondary" style="margin-top:0; margin-bottom:14px; margin-left:8px; width:auto; padding:8px 16px;" onclick="toggleVoiceOrder()">🎤 Voice add</button>
-      <div id="voice-order-status" style="font-size:12px; color:var(--muted); margin-bottom:8px; display:none;"></div>
       <div id="orders-list"></div>
       <div id="no-orders-msg" class="empty" style="display:none;">No open orders. Tap "+ New Order" to start one.</div>
       <div id="status-msg" class="status-msg"></div>
@@ -631,6 +629,11 @@ function renderOrdersList() {
       <div class="order-card-header" data-action="select">
         <div class="order-label">${label}${diningLabel}</div>
       </div>
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+        <button type="button" class="secondary" data-action="voice" data-order-id="${order.id}"
+          style="margin-top:0; width:auto; padding:8px 14px;">🎤 Voice add</button>
+      </div>
+      <div id="voice-status-${order.id}" style="font-size:12px; color:var(--muted); margin-bottom:10px; display:none;"></div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
         <div>
           <label style="font-size:11px; color:var(--muted); display:block; margin-bottom:4px;">Customer name</label>
@@ -658,6 +661,7 @@ function renderOrdersList() {
     `;
 
     card.querySelector('[data-action="share-bill"]').addEventListener('click', () => shareBillInProgress(order.id));
+    card.querySelector('[data-action="voice"]').addEventListener('click', () => toggleVoiceOrder(order.id));
 
     card.querySelector('[data-action="select"]').addEventListener('click', () => selectOrder(order.id));
     card.querySelector(`#customer-name-${order.id}`).addEventListener('change', () => saveCustomerInfo(order.id));
@@ -692,6 +696,8 @@ function renderOrdersList() {
 
     container.appendChild(card);
   });
+
+  refreshVoiceUi();   // re-apply voice button state + messages (cards were just rebuilt)
 }
 
 function renderItemRows(order) {
@@ -1121,34 +1127,111 @@ async function saveShopSettings() {
 
 
 // ---------------------------------------------------------------------------
-// Voice ordering
+// Voice ordering - one 🎤 button on EVERY order card.
 //
-// Keeps listening until you stop talking (or tap the button again), then sends
-// EVERYTHING you said in one go - so "two chicken momo, one veg momo, three
-// fries" adds all three. Dishes the server is unsure about are not added
-// blindly: they show up as one-tap choices.
+// The order you tap 🎤 on is the order the items go to - it is locked in when
+// recording starts (voiceOrderId), so tapping around the screen while you talk
+// can never send items to a different order.
+//
+// It keeps listening until you stop talking (or tap the button again), then
+// sends everything you said in one go. Dishes the server is unsure about are
+// not added blindly: they show as one-tap choices inside that same order card.
 // ---------------------------------------------------------------------------
 let voiceRecognition = null;
 let voiceListening = false;
+let voiceOrderId = null;         // the order the current recording belongs to
 let voiceTranscript = '';
 let voiceSent = false;
 let voiceHadError = false;
 let voiceSilenceTimer = null;
 const VOICE_SILENCE_MS = 2200;   // stop automatically after this much silence
 
+// What to show in each order's voice message area: orderId -> {text} | {result, heard}
+// Kept here (not in the page) because order cards are rebuilt on every redraw.
+const voiceStatusByOrder = {};
+
 function getVoiceRecognitionClass() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
 
-function voiceStatusBox() {
-  const el = document.getElementById('voice-order-status');
-  el.style.display = 'block';
-  return el;
+function setVoiceStatus(orderId, text) {
+  voiceStatusByOrder[orderId] = { text };
+  paintVoiceStatus(orderId);
 }
 
-function setVoiceStatus(text) {
-  const el = voiceStatusBox();
-  el.replaceChildren(document.createTextNode(text));
+function voiceLine(parent, text) {
+  const div = document.createElement('div');
+  div.style.marginBottom = '6px';
+  div.textContent = text;
+  parent.appendChild(div);
+  return div;
+}
+
+function paintVoiceStatus(orderId) {
+  const box = document.getElementById(`voice-status-${orderId}`);
+  if (!box) return;                       // that order's card is not on screen
+  const state = voiceStatusByOrder[orderId];
+  box.replaceChildren();
+  if (!state) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+
+  if (state.text !== undefined) {
+    box.appendChild(document.createTextNode(state.text));
+    return;
+  }
+
+  const { result, heard } = state;
+  voiceLine(box, `Heard: "${heard}"`).style.color = 'var(--muted)';
+
+  if (result.added.length) {
+    const names = result.added.map(a => `${a.quantity}x ${a.menu_item}`).join(', ');
+    voiceLine(box, `Added: ${names}`).style.color = 'var(--green)';
+  }
+
+  result.needs_review.forEach((review) => {
+    if (review.suggestions && review.suggestions.length) {
+      const row = document.createElement('div');
+      row.style.cssText = 'margin:8px 0; padding:8px; border:1px solid var(--panel-border); border-radius:8px;';
+      const label = document.createElement('div');
+      label.style.marginBottom = '6px';
+      label.textContent = `Not sure which one you meant by "${review.raw}" — tap the right dish:`;
+      row.appendChild(label);
+      review.suggestions.forEach((sug) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'secondary';
+        b.style.cssText = 'margin:0 6px 6px 0; width:auto; padding:6px 10px; font-size:12px;';
+        b.textContent = `${review.quantity}x ${sug.name}`;
+        b.onclick = () => addVoiceSuggestion(orderId, review, sug);
+        row.appendChild(b);
+      });
+      box.appendChild(row);
+    } else {
+      voiceLine(box, `Couldn't match "${review.raw}" to any menu item — tap it on the menu instead.`).style.color = 'var(--amber)';
+    }
+  });
+
+  if (!result.added.length && !result.needs_review.length) {
+    voiceLine(box, 'Didn\'t catch an item in that — try again.');
+  }
+}
+
+// Button labels + messages for every card currently on screen.
+function refreshVoiceUi() {
+  document.querySelectorAll('[data-action="voice"]').forEach((btn) => {
+    const id = Number(btn.dataset.orderId);
+    if (voiceListening && id === voiceOrderId) {
+      btn.textContent = '🎤 Listening… (tap when done)';
+      btn.disabled = false;
+    } else if (voiceListening) {
+      btn.textContent = '🎤 Voice add';
+      btn.disabled = true;               // only one order can be recorded at a time
+    } else {
+      btn.textContent = '🎤 Voice add';
+      btn.disabled = false;
+    }
+  });
+  Object.keys(openOrders).forEach((id) => paintVoiceStatus(Number(id)));
 }
 
 function stopVoice() {
@@ -1158,24 +1241,35 @@ function stopVoice() {
   }
 }
 
-function toggleVoiceOrder() {
+function toggleVoiceOrder(orderId) {
   const RecognitionClass = getVoiceRecognitionClass();
-  const btn = document.getElementById('voice-order-btn');
 
   if (!RecognitionClass) {
-    setVoiceStatus('Voice ordering needs Chrome (desktop or Android) — not supported in this browser.');
+    setVoiceStatus(orderId, 'Voice ordering needs Chrome (desktop or Android) — not supported in this browser.');
     return;
   }
 
-  // Tapping again while listening = "I'm done talking".
+  // Tapping 🎤 again on the order being recorded = "I'm done talking".
   if (voiceListening) {
-    stopVoice();
+    if (voiceOrderId === orderId) stopVoice();
     return;
   }
 
+  if (!openOrders[orderId]) {
+    showStatus('That order is no longer open.', 'error');
+    return;
+  }
+
+  const targetOrderId = orderId;          // locked in for this recording
+  voiceOrderId = targetOrderId;
   voiceTranscript = '';
   voiceSent = false;
   voiceHadError = false;
+  delete voiceStatusByOrder[targetOrderId];
+
+  // Highlight this order, so menu taps after talking also go to it.
+  activeOrderId = targetOrderId;
+  renderOrdersList();
 
   const rec = new RecognitionClass();
   voiceRecognition = rec;
@@ -1186,8 +1280,8 @@ function toggleVoiceOrder() {
 
   rec.onstart = () => {
     voiceListening = true;
-    btn.textContent = '🎤 Listening… (tap when done)';
-    setVoiceStatus('Listening — say everything, e.g. "two chicken momo, one veg momo fried, three french fries".');
+    refreshVoiceUi();
+    setVoiceStatus(targetOrderId, 'Listening — say everything, e.g. "two chicken momo, one veg momo fried, three french fries".');
   };
 
   rec.onresult = (event) => {
@@ -1212,7 +1306,7 @@ function toggleVoiceOrder() {
       }
     }
     voiceTranscript = (finals.join(' ') + ' ' + interim).trim();
-    setVoiceStatus(`Hearing: "${voiceTranscript}"`);
+    setVoiceStatus(targetOrderId, `Hearing: "${voiceTranscript}"`);
 
     clearTimeout(voiceSilenceTimer);
     voiceSilenceTimer = setTimeout(stopVoice, VOICE_SILENCE_MS);
@@ -1221,45 +1315,37 @@ function toggleVoiceOrder() {
   rec.onerror = (event) => {
     voiceHadError = true;
     if (event.error === 'no-speech') {
-      setVoiceStatus('Didn\'t hear anything — tap 🎤 and try again.');
+      setVoiceStatus(targetOrderId, 'Didn\'t hear anything — tap 🎤 and try again.');
     } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-      setVoiceStatus('Microphone permission is blocked — allow the mic for this site in your browser settings.');
+      setVoiceStatus(targetOrderId, 'Microphone permission is blocked — allow the mic for this site in your browser settings.');
     } else if (event.error !== 'aborted') {
-      setVoiceStatus('Voice error: ' + event.error);
+      setVoiceStatus(targetOrderId, 'Voice error: ' + event.error);
     }
   };
 
   rec.onend = () => {
     clearTimeout(voiceSilenceTimer);
     voiceListening = false;
-    btn.textContent = '🎤 Voice add';
+    refreshVoiceUi();
     if (voiceTranscript && !voiceSent) {
       voiceSent = true;
-      setVoiceStatus(`Heard: "${voiceTranscript}" — adding…`);
-      sendVoiceOrderText(voiceTranscript);
+      setVoiceStatus(targetOrderId, `Heard: "${voiceTranscript}" — adding…`);
+      sendVoiceOrderText(targetOrderId, voiceTranscript);
     } else if (!voiceTranscript && !voiceHadError) {
-      setVoiceStatus('Didn\'t hear anything — tap 🎤 and try again.');
+      setVoiceStatus(targetOrderId, 'Didn\'t hear anything — tap 🎤 and try again.');
     }
   };
 
   try {
     rec.start();
   } catch (e) {
-    setVoiceStatus('Could not start the microphone: ' + e.message);
+    setVoiceStatus(targetOrderId, 'Could not start the microphone: ' + e.message);
   }
 }
 
-function voiceLine(parent, text) {
-  const div = document.createElement('div');
-  div.style.marginBottom = '6px';
-  div.textContent = text;
-  parent.appendChild(div);
-  return div;
-}
-
-async function addVoiceSuggestion(review, suggestion, rowEl) {
+async function addVoiceSuggestion(orderId, review, suggestion) {
   try {
-    const order = await api(`/api/orders/${activeOrderId}/add_items/`, {
+    const order = await api(`/api/orders/${orderId}/add_items/`, {
       method: 'POST',
       body: JSON.stringify({
         menu_item: suggestion.menu_item_id,
@@ -1269,68 +1355,31 @@ async function addVoiceSuggestion(review, suggestion, rowEl) {
         has_extra_cheese: !!review.has_extra_cheese && !!suggestion.supports_cheese,
       }),
     });
-    openOrders[activeOrderId] = order;
-    renderOrdersList();
-    rowEl.replaceChildren(document.createTextNode(`Added: ${review.quantity}x ${suggestion.name}`));
-  } catch (e) {
-    rowEl.replaceChildren(document.createTextNode(e.message));
-  }
-}
+    openOrders[orderId] = order;
 
-function renderVoiceResult(result, heardText) {
-  const box = voiceStatusBox();
-  box.replaceChildren();
-  voiceLine(box, `Heard: "${heardText}"`).style.color = 'var(--muted)';
-
-  if (result.added.length) {
-    const names = result.added.map(a => `${a.quantity}x ${a.menu_item}`).join(', ');
-    const line = voiceLine(box, `Added: ${names}`);
-    line.style.color = 'var(--green)';
-  }
-
-  result.needs_review.forEach((review) => {
-    if (review.suggestions && review.suggestions.length) {
-      const row = document.createElement('div');
-      row.style.cssText = 'margin:8px 0; padding:8px; border:1px solid var(--panel-border); border-radius:8px;';
-      const label = document.createElement('div');
-      label.style.marginBottom = '6px';
-      label.textContent = `Not sure which one you meant by "${review.raw}" — tap the right dish:`;
-      row.appendChild(label);
-      review.suggestions.forEach((sug) => {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'secondary';
-        b.style.cssText = 'margin:0 6px 6px 0; width:auto; padding:6px 10px; font-size:12px;';
-        b.textContent = `${review.quantity}x ${sug.name}`;
-        b.onclick = () => addVoiceSuggestion(review, sug, row);
-        row.appendChild(b);
-      });
-      box.appendChild(row);
-    } else {
-      voiceLine(box, `Couldn't match "${review.raw}" to any menu item — tap it on the menu instead.`).style.color = 'var(--amber)';
+    // Move this line from "not sure" to "added" so it stays correct after redraws.
+    const state = voiceStatusByOrder[orderId];
+    if (state && state.result) {
+      state.result.needs_review = state.result.needs_review.filter(r => r !== review);
+      state.result.added.push({ quantity: review.quantity, menu_item: suggestion.name });
     }
-  });
-
-  if (!result.added.length && !result.needs_review.length) {
-    voiceLine(box, 'Didn\'t catch an item in that — try again.');
+    renderOrdersList();
+  } catch (e) {
+    showStatus(e.message, 'error');
   }
 }
 
-async function sendVoiceOrderText(text) {
-  if (!activeOrderId) {
-    await startNewOrder();
-  }
-  if (!activeOrderId) return;
-
+async function sendVoiceOrderText(orderId, text) {
   try {
-    const result = await api(`/api/orders/${activeOrderId}/voice_add/`, {
+    const result = await api(`/api/orders/${orderId}/voice_add/`, {
       method: 'POST', body: JSON.stringify({ text }),
     });
-    openOrders[activeOrderId] = result.order;
+    openOrders[orderId] = result.order;
+    voiceStatusByOrder[orderId] = { result: { added: result.added, needs_review: result.needs_review }, heard: text };
     renderOrdersList();
-    renderVoiceResult(result, text);
   } catch (e) {
-    setVoiceStatus(e.message);
+    if (openOrders[orderId]) setVoiceStatus(orderId, e.message);
+    else showStatus(e.message, 'error');
   }
 }
 
